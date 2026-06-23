@@ -185,3 +185,31 @@ func TestShellCommandUsesInteractiveTTYExec(t *testing.T) {
 		t.Fatalf("args mismatch\nwant: %#v\n got: %#v", wantArgs, cmd.Args[1:])
 	}
 }
+
+func TestPullImageUsesPlainProgress(t *testing.T) {
+	runner := &fakeRunner{}
+	client := &Client{Binary: "container", Runner: runner, Timeout: time.Second}
+
+	if err := client.PullImage(context.Background(), "docker.io/library/alpine:latest"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantArgs := []string{"image", "pull", "--progress", "plain", "docker.io/library/alpine:latest"}
+	if !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("args mismatch\nwant: %#v\n got: %#v", wantArgs, runner.args)
+	}
+}
+
+func TestRunImageUsesDetachedContainerWithOptionalName(t *testing.T) {
+	runner := &fakeRunner{}
+	client := &Client{Binary: "container", Runner: runner, Timeout: time.Second}
+
+	if err := client.RunImage(context.Background(), "docker.io/library/alpine:latest", "scratch"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantArgs := []string{"run", "--detach", "--name", "scratch", "docker.io/library/alpine:latest"}
+	if !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("args mismatch\nwant: %#v\n got: %#v", wantArgs, runner.args)
+	}
+}

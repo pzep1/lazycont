@@ -28,6 +28,8 @@ type Client interface {
 	InspectVolume(context.Context, string) (string, error)
 	InspectNetwork(context.Context, string) (string, error)
 	ShellCommand(string, string) (*exec.Cmd, error)
+	PullImage(context.Context, string) error
+	RunImage(context.Context, string, string) error
 	Start(context.Context, string) error
 	Stop(context.Context, string) error
 	Kill(context.Context, string) error
@@ -70,6 +72,14 @@ const (
 	confirmPruneNetworks
 )
 
+type promptKind int
+
+const (
+	promptNone promptKind = iota
+	promptPullImage
+	promptRunImage
+)
+
 type pendingConfirm struct {
 	action confirmAction
 	target string
@@ -95,14 +105,17 @@ type Model struct {
 	stats      []containercli.Stat
 	system     containercli.SystemStatus
 
-	panelMode   panelMode
-	panelTitle  string
-	panelBody   string
-	panelOffset int
-	showHelp    bool
-	filter      string
-	filterInput string
-	filtering   bool
+	panelMode    panelMode
+	panelTitle   string
+	panelBody    string
+	panelOffset  int
+	showHelp     bool
+	filter       string
+	filterInput  string
+	filtering    bool
+	prompt       promptKind
+	promptInput  string
+	promptTarget string
 
 	busy        string
 	statusLine  string
@@ -219,6 +232,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.confirm != nil {
 		return m.handleConfirmKey(key)
 	}
+	if m.prompt != promptNone {
+		return m.handlePromptKey(msg)
+	}
 	if m.filtering {
 		return m.handleFilterKey(msg)
 	}
@@ -274,6 +290,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter", "i":
 		return m.inspectSelected()
+	case "a":
+		return m.startPullPrompt(), nil
+	case "R":
+		return m.startRunPrompt()
 	case "l":
 		return m.logsSelected()
 	case "e":
@@ -304,6 +324,29 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	return m, nil
+}
+
+func (m Model) startPullPrompt() Model {
+	m.prompt = promptPullImage
+	m.promptInput = ""
+	m.promptTarget = ""
+	m.statusLine = "pull image"
+	return m
+}
+
+func (m Model) startRunPrompt() (tea.Model, tea.Cmd) {
+	if m.active != resourceImages {
+		return m, nil
+	}
+	image, ok := m.selectedImage()
+	if !ok {
+		return m, nil
+	}
+	m.prompt = promptRunImage
+	m.promptInput = ""
+	m.promptTarget = image.Name()
+	m.statusLine = "run image " + image.Name()
 	return m, nil
 }
 
@@ -355,6 +398,75 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filterInput += string(msg.Runes)
 	}
 	return m, nil
+}
+
+func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "enter":
+		return m.applyPrompt()
+	case "esc":
+		m.prompt = promptNone
+		m.promptInput = ""
+		m.promptTarget = ""
+		m.statusLine = "cancelled"
+		return m, nil
+	case "backspace", "ctrl+h":
+		if len(m.promptInput) > 0 {
+			m.promptInput = m.promptInput[:len(m.promptInput)-1]
+		}
+		return m, nil
+	case "ctrl+u":
+		m.promptInput = ""
+		return m, nil
+	}
+
+	if msg.Type == tea.KeyRunes {
+		m.promptInput += string(msg.Runes)
+	}
+	return m, nil
+}
+
+func (m Model) applyPrompt() (tea.Model, tea.Cmd) {
+	switch m.prompt {
+	case promptPullImage:
+		reference := strings.TrimSpace(m.promptInput)
+		m.prompt = promptNone
+		m.promptInput = ""
+		if reference == "" {
+			m.statusLine = "pull cancelled"
+			return m, nil
+		}
+		m.busy = "pulling " + reference
+		m.statusLine = "pulling " + reference
+		return m, func() tea.Msg {
+			err := m.client.PullImage(context.Background(), reference)
+			return actionDoneMsg{message: "pulled image " + reference, err: err}
+		}
+	case promptRunImage:
+		image := m.promptTarget
+		name := strings.TrimSpace(m.promptInput)
+		m.prompt = promptNone
+		m.promptInput = ""
+		m.promptTarget = ""
+		if strings.TrimSpace(image) == "" {
+			m.statusLine = "run cancelled"
+			return m, nil
+		}
+		m.busy = "running " + image
+		m.statusLine = "running " + image
+		return m, func() tea.Msg {
+			err := m.client.RunImage(context.Background(), image, name)
+			message := "started container from " + image
+			if name != "" {
+				message = "started " + name
+			}
+			return actionDoneMsg{message: message, err: err}
+		}
+	default:
+		return m, nil
+	}
 }
 
 func (m Model) handleConfirmKey(key string) (tea.Model, tea.Cmd) {
@@ -781,6 +893,9 @@ func (m Model) renderFooter() string {
 	if m.confirm != nil {
 		return topStyle.Width(m.width).Foreground(colorYellow).Render(m.confirm.label + "  y/enter confirm, n/esc cancel")
 	}
+	if m.prompt != promptNone {
+		return footerStyle.Width(m.width).Foreground(colorActive).Render(truncate(m.promptLine(), m.width-2))
+	}
 	if m.filtering {
 		value := m.filterInput
 		if value == "" {
@@ -790,7 +905,7 @@ func (m Model) renderFooter() string {
 		return footerStyle.Width(m.width).Foreground(colorActive).Render(truncate(line, m.width-2))
 	}
 	if m.showHelp {
-		help := "tab switch | / filter | esc clear filter | r refresh | i inspect | l logs | e shell | s start | x stop | K kill | d delete | p prune | pgup/pgdown scroll | q quit"
+		help := "tab switch | / filter | a pull image | R run image | r refresh | i inspect | l logs | e shell | s start | x stop | K kill | d delete | p prune | q quit"
 		return footerStyle.Width(m.width).Render(truncate(help, m.width-2))
 	}
 	status := m.statusLine
@@ -804,6 +919,17 @@ func (m Model) renderFooter() string {
 		return footerStyle.Width(m.width).Foreground(colorRed).Render(truncate(status, m.width-2))
 	}
 	return footerStyle.Width(m.width).Render(truncate(status+" | ? help", m.width-2))
+}
+
+func (m Model) promptLine() string {
+	switch m.prompt {
+	case promptPullImage:
+		return "pull image: " + m.promptInput + "  enter pull, esc cancel"
+	case promptRunImage:
+		return "container name for " + m.promptTarget + ": " + m.promptInput + "  enter run, blank auto, esc cancel"
+	default:
+		return ""
+	}
 }
 
 func (m Model) renderSidebar(width int, height int) string {

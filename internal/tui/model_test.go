@@ -13,6 +13,9 @@ import (
 
 type fakeClient struct {
 	started        string
+	pulled         string
+	runImage       string
+	runName        string
 	deleted        string
 	deletedVolume  string
 	deletedNetwork string
@@ -99,6 +102,17 @@ func (f *fakeClient) InspectNetwork(context.Context, string) (string, error) {
 
 func (f *fakeClient) ShellCommand(string, string) (*exec.Cmd, error) {
 	return exec.Command("true"), nil
+}
+
+func (f *fakeClient) PullImage(_ context.Context, reference string) error {
+	f.pulled = reference
+	return nil
+}
+
+func (f *fakeClient) RunImage(_ context.Context, image string, name string) error {
+	f.runImage = image
+	f.runName = name
+	return nil
 }
 
 func (f *fakeClient) Start(_ context.Context, id string) error {
@@ -268,6 +282,66 @@ func TestShellRequiresRunningContainer(t *testing.T) {
 	view := updated.View()
 	if !strings.Contains(view, "start db before opening a shell") {
 		t.Fatalf("view did not explain shell guard:\n%s", view)
+	}
+}
+
+func TestPullImagePromptRunsPullAndRefreshes(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 110, Height: 24})
+	updated, _ = updated.Update(snapshotMsg{system: containercli.SystemStatus{Status: "running"}})
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	for _, r := range "docker.io/library/alpine:latest" {
+		updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("expected pull command")
+	}
+	done := cmd().(actionDoneMsg)
+	updated, refresh := updated.Update(done)
+	if refresh == nil {
+		t.Fatalf("expected refresh after pull")
+	}
+
+	if client.pulled != "docker.io/library/alpine:latest" {
+		t.Fatalf("expected pulled image reference, got %q", client.pulled)
+	}
+}
+
+func TestRunSelectedImagePromptsForOptionalName(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 110, Height: 24})
+	updated, _ = updated.Update(snapshotMsg{
+		system: containercli.SystemStatus{Status: "running"},
+		images: []containercli.Image{{
+			ID: "abc",
+			Configuration: containercli.ImageConfiguration{
+				Name: "docker.io/library/alpine:latest",
+			},
+		}},
+	})
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	for _, r := range "scratch" {
+		updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("expected run image command")
+	}
+	done := cmd().(actionDoneMsg)
+	updated, refresh := updated.Update(done)
+	if refresh == nil {
+		t.Fatalf("expected refresh after run")
+	}
+
+	if client.runImage != "docker.io/library/alpine:latest" {
+		t.Fatalf("expected run image target, got %q", client.runImage)
+	}
+	if client.runName != "scratch" {
+		t.Fatalf("expected container name scratch, got %q", client.runName)
 	}
 }
 

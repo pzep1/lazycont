@@ -9,6 +9,7 @@ This is an early usable slice focused on day-to-day container work:
 - filter resource lists across names and metadata
 - inspect selected resources
 - tail container logs
+- pull images and run selected images as detached containers
 - start, stop, kill, and delete containers
 - delete or prune images
 - refresh Apple container system status, lists, and one-shot stats
@@ -40,6 +41,8 @@ go build -o bin/lazycont ./cmd/lazycont
 | `up` / `k` | Move selection up |
 | `down` / `j` | Move selection down |
 | `r` | Refresh lists and status |
+| `a` | Pull an image by reference |
+| `R` | Run the selected image detached, with an optional name |
 | `i` / `enter` | Inspect selected resource |
 | `l` | Tail selected container logs |
 | `e` | Open `/bin/sh` in the selected running container |

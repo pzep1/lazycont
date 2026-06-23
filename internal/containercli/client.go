@@ -27,16 +27,18 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 }
 
 type Client struct {
-	Binary  string
-	Runner  Runner
-	Timeout time.Duration
+	Binary      string
+	Runner      Runner
+	Timeout     time.Duration
+	LongTimeout time.Duration
 }
 
 func New(binary string) *Client {
 	return &Client{
-		Binary:  binary,
-		Runner:  ExecRunner{},
-		Timeout: 15 * time.Second,
+		Binary:      binary,
+		Runner:      ExecRunner{},
+		Timeout:     15 * time.Second,
+		LongTimeout: 30 * time.Minute,
 	}
 }
 
@@ -131,6 +133,29 @@ func (c *Client) ShellCommand(id string, shell string) (*exec.Cmd, error) {
 	return exec.Command(c.binaryName(), "exec", "--interactive", "--tty", id, shell), nil
 }
 
+func (c *Client) PullImage(ctx context.Context, reference string) error {
+	reference = strings.TrimSpace(reference)
+	if reference == "" {
+		return errors.New("image reference is required")
+	}
+	_, err := c.runLong(ctx, "image", "pull", "--progress", "plain", reference)
+	return err
+}
+
+func (c *Client) RunImage(ctx context.Context, image string, name string) error {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return errors.New("image is required")
+	}
+	args := []string{"run", "--detach"}
+	if strings.TrimSpace(name) != "" {
+		args = append(args, "--name", strings.TrimSpace(name))
+	}
+	args = append(args, image)
+	_, err := c.runLong(ctx, args...)
+	return err
+}
+
 func (c *Client) Start(ctx context.Context, id string) error {
 	_, err := c.run(ctx, "start", id)
 	return err
@@ -204,10 +229,17 @@ func (c *Client) runJSON(ctx context.Context, target any, args ...string) error 
 }
 
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
+	return c.runWithTimeout(ctx, c.Timeout, args...)
+}
+
+func (c *Client) runLong(ctx context.Context, args ...string) ([]byte, error) {
+	return c.runWithTimeout(ctx, c.LongTimeout, args...)
+}
+
+func (c *Client) runWithTimeout(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
 	if c.Runner == nil {
 		c.Runner = ExecRunner{}
 	}
-	timeout := c.Timeout
 	if timeout <= 0 {
 		timeout = 15 * time.Second
 	}
