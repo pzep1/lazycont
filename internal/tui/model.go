@@ -38,6 +38,7 @@ type Client interface {
 	RunImage(context.Context, string, string) error
 	Start(context.Context, string) error
 	Stop(context.Context, string) error
+	Restart(context.Context, string) error
 	StopMachine(context.Context, string) error
 	Kill(context.Context, string) error
 	DeleteContainer(context.Context, string, bool) error
@@ -311,6 +312,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.busy = "refreshing"
 		m.statusLine = "refreshing"
 		return m, m.refreshCmd()
+	case "ctrl+r":
+		return m.restartSelected()
 	case "u":
 		m.autoRefresh = !m.autoRefresh
 		if m.autoRefresh {
@@ -821,6 +824,27 @@ func (m Model) machineShellSelected() (tea.Model, tea.Cmd) {
 	})
 }
 
+func (m Model) restartSelected() (tea.Model, tea.Cmd) {
+	if m.active != resourceContainers {
+		return m, nil
+	}
+	container, ok := m.selectedContainer()
+	if !ok {
+		return m, nil
+	}
+	id := container.Name()
+	if container.State() != "running" {
+		m.statusLine = "start " + id + " before restarting"
+		return m, nil
+	}
+	m.busy = "restarting"
+	m.statusLine = "restarting " + id
+	return m, func() tea.Msg {
+		err := m.client.Restart(context.Background(), id)
+		return actionDoneMsg{message: "restarted " + id, err: err}
+	}
+}
+
 func (m Model) lifecycleSelected(busy string, done string, action func(context.Context, string) error) (tea.Model, tea.Cmd) {
 	if m.active == resourceMachines && busy == "stopping" {
 		machine, ok := m.selectedMachine()
@@ -1127,7 +1151,7 @@ func (m Model) renderFooter() string {
 		return footerStyle.Width(m.width).Foreground(colorActive).Render(truncate(line, m.width-2))
 	}
 	if m.showHelp {
-		help := "tab switch | / filter | r refresh | u auto-refresh | a pull image | R run image | i inspect | l logs | f follow logs | e shell | s start | x stop | K kill | d delete | p prune | q quit"
+		help := "tab switch | / filter | r refresh | u auto-refresh | a pull image | R run image | i inspect | l logs | f follow logs | e shell | s start | ctrl+r restart | x stop | K kill | d delete | p prune | q quit"
 		return footerStyle.Width(m.width).Render(truncate(help, m.width-2))
 	}
 	status := m.statusLine

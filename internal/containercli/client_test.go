@@ -10,10 +10,12 @@ import (
 type fakeRunner struct {
 	output []byte
 	args   []string
+	calls  [][]string
 }
 
 func (f *fakeRunner) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
 	f.args = append([]string(nil), args...)
+	f.calls = append(f.calls, append([]string(nil), args...))
 	return f.output, nil
 }
 
@@ -330,6 +332,23 @@ func TestRunImageUsesDetachedContainerWithOptionalName(t *testing.T) {
 	wantArgs := []string{"run", "--detach", "--name", "scratch", "docker.io/library/alpine:latest"}
 	if !reflect.DeepEqual(runner.args, wantArgs) {
 		t.Fatalf("args mismatch\nwant: %#v\n got: %#v", wantArgs, runner.args)
+	}
+}
+
+func TestRestartStopsThenStartsContainer(t *testing.T) {
+	runner := &fakeRunner{}
+	client := &Client{Binary: "container", Runner: runner, Timeout: time.Second}
+
+	if err := client.Restart(context.Background(), "db"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantCalls := [][]string{
+		{"stop", "db"},
+		{"start", "db"},
+	}
+	if !reflect.DeepEqual(runner.calls, wantCalls) {
+		t.Fatalf("calls mismatch\nwant: %#v\n got: %#v", wantCalls, runner.calls)
 	}
 }
 

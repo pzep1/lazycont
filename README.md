@@ -12,7 +12,7 @@ This is an early usable slice focused on day-to-day container work:
 - tail container or machine logs
 - follow container or machine logs in the terminal
 - pull images and run selected images as detached containers
-- start, stop, kill, and delete containers
+- start, restart, stop, kill, and delete containers
 - stop and delete machines
 - prune stopped containers and unused images, volumes, or networks
 - delete images, volumes, networks, or machines
@@ -53,6 +53,7 @@ go build -o bin/lazycont ./cmd/lazycont
 | `f` | Follow selected container or machine logs until the command exits |
 | `e` | Open `/bin/sh` in the selected running container, or a shell in the selected machine |
 | `s` | Start selected container |
+| `ctrl+r` | Restart selected running container |
 | `x` | Stop selected container or machine |
 | `K` | Kill selected container |
 | `d` | Delete selected container, image, volume, network, or machine, with confirmation |

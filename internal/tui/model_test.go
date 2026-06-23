@@ -17,6 +17,7 @@ type fakeClient struct {
 	pulled         string
 	runImage       string
 	runName        string
+	restarted      string
 	followLogsID   string
 	machineLogsID  string
 	machineShellID string
@@ -167,6 +168,11 @@ func (f *fakeClient) Start(_ context.Context, id string) error {
 }
 
 func (f *fakeClient) Stop(context.Context, string) error {
+	return nil
+}
+
+func (f *fakeClient) Restart(_ context.Context, id string) error {
+	f.restarted = id
 	return nil
 }
 
@@ -365,6 +371,51 @@ func TestShellRequiresRunningContainer(t *testing.T) {
 	view := updated.View()
 	if !strings.Contains(view, "start db before opening a shell") {
 		t.Fatalf("view did not explain shell guard:\n%s", view)
+	}
+}
+
+func TestRestartRequiresRunningContainer(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	msg := model.refreshCmd()().(snapshotMsg)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	updated, _ = updated.Update(msg)
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if cmd != nil {
+		t.Fatalf("expected no restart command for stopped container")
+	}
+	if client.restarted != "" {
+		t.Fatalf("restart ran for stopped container")
+	}
+	view := updated.View()
+	if !strings.Contains(view, "start db before restarting") {
+		t.Fatalf("view did not explain restart guard:\n%s", view)
+	}
+}
+
+func TestRestartUsesSelectedRunningContainer(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 110, Height: 24})
+	updated, _ = updated.Update(snapshotMsg{
+		system: containercli.SystemStatus{Status: "running"},
+		containers: []containercli.Container{
+			testContainerWithState("api-service", "docker.io/library/alpine:latest", "running"),
+			testContainerWithState("db", "docker.io/library/postgres:17", "running"),
+		},
+	})
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if cmd == nil {
+		t.Fatalf("expected restart command")
+	}
+	done := cmd().(actionDoneMsg)
+	updated, refresh := updated.Update(done)
+	if refresh == nil {
+		t.Fatalf("expected refresh after restart")
+	}
+	if client.restarted != "db" {
+		t.Fatalf("expected selected container db, got %q", client.restarted)
 	}
 }
 
@@ -601,6 +652,10 @@ func switchToMachines(t *testing.T, model tea.Model) tea.Model {
 }
 
 func testContainer(id string, image string) containercli.Container {
+	return testContainerWithState(id, image, "stopped")
+}
+
+func testContainerWithState(id string, image string, state string) containercli.Container {
 	return containercli.Container{
 		ID: id,
 		Configuration: containercli.ContainerConfiguration{
@@ -610,6 +665,6 @@ func testContainer(id string, image string) containercli.Container {
 			},
 			Platform: containercli.Platform{OS: "linux", Architecture: "arm64"},
 		},
-		Status: containercli.ContainerStatus{State: "stopped"},
+		Status: containercli.ContainerStatus{State: state},
 	}
 }

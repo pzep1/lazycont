@@ -218,6 +218,17 @@ func (c *Client) Stop(ctx context.Context, id string) error {
 	return err
 }
 
+func (c *Client) Restart(ctx context.Context, id string) error {
+	if strings.TrimSpace(id) == "" {
+		return errors.New("container id is required")
+	}
+	if _, err := c.run(ctx, "stop", id); err != nil {
+		return err
+	}
+	_, err := c.run(ctx, "start", id)
+	return err
+}
+
 func (c *Client) StopMachine(ctx context.Context, id string) error {
 	if strings.TrimSpace(id) == "" {
 		return errors.New("machine id is required")
