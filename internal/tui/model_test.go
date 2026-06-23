@@ -34,9 +34,11 @@ type fakeClient struct {
 	exportOutput    string
 	restarted       string
 	followLogsID    string
+	logsRead        int
 	execID          string
 	execCommand     string
 	machineLogsID   string
+	machineLogsRead int
 	machineShellID  string
 	machineImage    string
 	machineName     string
@@ -51,6 +53,7 @@ type fakeClient struct {
 	builderStopped  bool
 	builderDeleted  bool
 	systemLogsRead  bool
+	systemLogsCount int
 	systemFollowed  bool
 	systemStarted   bool
 	systemStopped   bool
@@ -192,6 +195,7 @@ func (f *fakeClient) Stats(context.Context, ...string) ([]containercli.Stat, err
 }
 
 func (f *fakeClient) Logs(context.Context, string, int) (string, error) {
+	f.logsRead++
 	return "ready\n", nil
 }
 
@@ -202,6 +206,7 @@ func (f *fakeClient) FollowLogsCommand(id string, _ int) (*exec.Cmd, error) {
 
 func (f *fakeClient) MachineLogs(_ context.Context, id string, _ int) (string, error) {
 	f.machineLogsID = id
+	f.machineLogsRead++
 	return "machine ready\n", nil
 }
 
@@ -212,6 +217,7 @@ func (f *fakeClient) FollowMachineLogsCommand(id string, _ int) (*exec.Cmd, erro
 
 func (f *fakeClient) SystemLogs(context.Context, string) (string, error) {
 	f.systemLogsRead = true
+	f.systemLogsCount++
 	return "system ready\n", nil
 }
 
@@ -1023,6 +1029,85 @@ func TestFollowLogsUsesSelectedContainer(t *testing.T) {
 	}
 	if client.followLogsID != "db" {
 		t.Fatalf("expected selected container db, got %q", client.followLogsID)
+	}
+}
+
+func TestManualRefreshReloadsActiveContainerLogs(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	updated, _ = updated.Update(snapshotMsg{
+		system: containercli.SystemStatus{Status: "running"},
+		containers: []containercli.Container{
+			testContainer("api-service", "docker.io/library/alpine:latest"),
+		},
+	})
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if cmd == nil {
+		t.Fatalf("expected initial logs command")
+	}
+	updated, _ = updated.Update(cmd().(outputMsg))
+	if client.logsRead != 1 {
+		t.Fatalf("expected one initial logs call, got %d", client.logsRead)
+	}
+
+	_, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if cmd == nil {
+		t.Fatalf("expected refresh command")
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected refresh/logs batch, got %T", msg)
+	}
+	if len(batch) != 2 {
+		t.Fatalf("expected snapshot and logs commands, got %d", len(batch))
+	}
+	if _, ok := batch[1]().(outputMsg); !ok {
+		t.Fatalf("expected logs output message")
+	}
+	if client.logsRead != 2 {
+		t.Fatalf("expected logs to reload during manual refresh, got %d calls", client.logsRead)
+	}
+}
+
+func TestAutoRefreshReloadsActiveContainerLogs(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	model.refreshInterval = time.Nanosecond
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	updated, _ = updated.Update(snapshotMsg{
+		system: containercli.SystemStatus{Status: "running"},
+		containers: []containercli.Container{
+			testContainer("api-service", "docker.io/library/alpine:latest"),
+		},
+	})
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if cmd == nil {
+		t.Fatalf("expected initial logs command")
+	}
+	updated, _ = updated.Update(cmd().(outputMsg))
+	if client.logsRead != 1 {
+		t.Fatalf("expected one initial logs call, got %d", client.logsRead)
+	}
+
+	_, cmd = updated.Update(autoRefreshMsg(time.Now()))
+	if cmd == nil {
+		t.Fatalf("expected auto-refresh command")
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected refresh/logs/tick batch, got %T", msg)
+	}
+	if len(batch) != 3 {
+		t.Fatalf("expected snapshot, logs, and next tick commands, got %d", len(batch))
+	}
+	if _, ok := batch[1]().(outputMsg); !ok {
+		t.Fatalf("expected logs output message")
+	}
+	if client.logsRead != 2 {
+		t.Fatalf("expected logs to reload during auto-refresh, got %d calls", client.logsRead)
 	}
 }
 

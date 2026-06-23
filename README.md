@@ -32,7 +32,7 @@ This is an early usable slice focused on day-to-day container work:
 - start and stop Apple container services
 - prune stopped containers and unused images, volumes, or networks
 - delete images, volumes, networks, or machines
-- auto-refresh Apple container system status, lists, and one-shot stats
+- auto-refresh Apple container system status, lists, one-shot stats, and the active logs pane
 
 ## Requirements
 

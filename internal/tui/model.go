@@ -389,7 +389,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.busy = "refreshing"
 		m.statusLine = "refreshing"
-		return m, m.refreshCmd()
+		return m, m.refreshWithActivePanelCmd(nil)
 	case "ctrl+r":
 		return m.restartSelected()
 	case "u":
@@ -1504,6 +1504,19 @@ func (m Model) autoRefreshCmd() tea.Cmd {
 	})
 }
 
+func (m Model) refreshWithActivePanelCmd(nextTick tea.Cmd) tea.Cmd {
+	cmds := []tea.Cmd{m.refreshCmd()}
+	if m.panelMode == panelLogs {
+		if _, cmd := m.logsCommandForSelection(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if nextTick != nil {
+		cmds = append(cmds, nextTick)
+	}
+	return tea.Batch(cmds...)
+}
+
 func (m Model) handleAutoRefresh() (tea.Model, tea.Cmd) {
 	nextTick := m.autoRefreshCmd()
 	if !m.autoRefresh {
@@ -1514,7 +1527,7 @@ func (m Model) handleAutoRefresh() (tea.Model, tea.Cmd) {
 	}
 	m.busy = "refreshing"
 	m.statusLine = "auto refreshing"
-	return m, tea.Batch(m.refreshCmd(), nextTick)
+	return m, m.refreshWithActivePanelCmd(nextTick)
 }
 
 func (m Model) inspectSelected() (tea.Model, tea.Cmd) {
@@ -1616,16 +1629,24 @@ func (m Model) inspectSelected() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) logsSelected() (tea.Model, tea.Cmd) {
+	busy, cmd := m.logsCommandForSelection()
+	if cmd == nil {
+		return m, nil
+	}
+	m.busy = busy
+	m.panelMode = panelLogs
+	return m, cmd
+}
+
+func (m Model) logsCommandForSelection() (string, tea.Cmd) {
 	switch m.active {
 	case resourceContainers:
 		container, ok := m.selectedContainer()
 		if !ok {
-			return m, nil
+			return "", nil
 		}
 		id := container.Name()
-		m.busy = "loading logs"
-		m.panelMode = panelLogs
-		return m, func() tea.Msg {
+		return "loading logs", func() tea.Msg {
 			body, err := m.client.Logs(context.Background(), id, 200)
 			if strings.TrimSpace(body) == "" && err == nil {
 				body = "No logs returned."
@@ -1635,12 +1656,10 @@ func (m Model) logsSelected() (tea.Model, tea.Cmd) {
 	case resourceMachines:
 		machine, ok := m.selectedMachine()
 		if !ok {
-			return m, nil
+			return "", nil
 		}
 		id := machine.Name()
-		m.busy = "loading logs"
-		m.panelMode = panelLogs
-		return m, func() tea.Msg {
+		return "loading logs", func() tea.Msg {
 			body, err := m.client.MachineLogs(context.Background(), id, 200)
 			if strings.TrimSpace(body) == "" && err == nil {
 				body = "No machine logs returned."
@@ -1649,11 +1668,9 @@ func (m Model) logsSelected() (tea.Model, tea.Cmd) {
 		}
 	case resourceSystem:
 		if !m.systemMatchesFilter() {
-			return m, nil
+			return "", nil
 		}
-		m.busy = "loading system logs"
-		m.panelMode = panelLogs
-		return m, func() tea.Msg {
+		return "loading system logs", func() tea.Msg {
 			body, err := m.client.SystemLogs(context.Background(), "5m")
 			if strings.TrimSpace(body) == "" && err == nil {
 				body = "No system logs returned."
@@ -1661,7 +1678,7 @@ func (m Model) logsSelected() (tea.Model, tea.Cmd) {
 			return outputMsg{title: "System logs", body: body, err: err}
 		}
 	}
-	return m, nil
+	return "", nil
 }
 
 func (m Model) followLogsSelected() (tea.Model, tea.Cmd) {
