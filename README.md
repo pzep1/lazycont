@@ -19,7 +19,7 @@ This is an early usable slice focused on day-to-day container work:
 - push selected images to a registry
 - pull images and run selected images as detached containers
 - start, restart, stop, kill, and delete containers
-- stop and delete machines
+- create, stop, delete, and set default machines
 - prune stopped containers and unused images, volumes, or networks
 - delete images, volumes, networks, or machines
 - auto-refresh Apple container system status, lists, and one-shot stats
@@ -57,6 +57,8 @@ go build -o bin/lazycont ./cmd/lazycont
 | `t` | Tag selected image with a new reference |
 | `P` | Push selected image to its registry |
 | `R` | Run the selected image detached, with an optional name |
+| `M` | Create a machine from the machines pane as `<image> [name]` |
+| `S` | Set selected machine as the default machine |
 | `i` / `enter` | Inspect selected resource |
 | `c` | Copy files for the selected container as `<src> <dest>`; use `:/path` for the selected container |
 | `l` | Tail selected container or machine logs |

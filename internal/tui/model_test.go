@@ -28,6 +28,9 @@ type fakeClient struct {
 	followLogsID   string
 	machineLogsID  string
 	machineShellID string
+	machineImage   string
+	machineName    string
+	defaultMachine string
 	stoppedMachine string
 	deleted        string
 	deletedVolume  string
@@ -156,6 +159,17 @@ func (f *fakeClient) ShellCommand(string, string) (*exec.Cmd, error) {
 func (f *fakeClient) MachineShellCommand(id string) (*exec.Cmd, error) {
 	f.machineShellID = id
 	return exec.Command("true"), nil
+}
+
+func (f *fakeClient) CreateMachine(_ context.Context, image string, name string) error {
+	f.machineImage = image
+	f.machineName = name
+	return nil
+}
+
+func (f *fakeClient) SetDefaultMachine(_ context.Context, id string) error {
+	f.defaultMachine = id
+	return nil
 }
 
 func (f *fakeClient) PullImage(_ context.Context, reference string) error {
@@ -674,6 +688,65 @@ func TestMachinePaneShowsAndActionsUseSelectedMachine(t *testing.T) {
 	updated, _ = updated.Update(deleteDone)
 	if client.deletedMachine != "dev-machine" {
 		t.Fatalf("expected deleted machine dev-machine, got %q", client.deletedMachine)
+	}
+}
+
+func TestCreateMachinePromptUsesImageAndOptionalName(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 110, Height: 24})
+	updated, _ = updated.Update(snapshotMsg{system: containercli.SystemStatus{Status: "running"}})
+	updated = switchToMachines(t, updated)
+
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'M'}})
+	for _, r := range "alpine:3.22 dev-machine" {
+		updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("expected create machine command")
+	}
+	done := cmd().(actionDoneMsg)
+	updated, refresh := updated.Update(done)
+	if refresh == nil {
+		t.Fatalf("expected refresh after create machine")
+	}
+
+	if client.machineImage != "alpine:3.22" {
+		t.Fatalf("expected machine image alpine:3.22, got %q", client.machineImage)
+	}
+	if client.machineName != "dev-machine" {
+		t.Fatalf("expected machine name dev-machine, got %q", client.machineName)
+	}
+}
+
+func TestSetDefaultMachineUsesSelectedMachine(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 110, Height: 24})
+	updated, _ = updated.Update(snapshotMsg{
+		system: containercli.SystemStatus{Status: "running"},
+		machines: []containercli.Machine{{
+			ID: "dev-machine",
+			Status: map[string]any{
+				"state": "stopped",
+			},
+		}},
+	})
+	updated = switchToMachines(t, updated)
+
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	if cmd == nil {
+		t.Fatalf("expected set default machine command")
+	}
+	done := cmd().(actionDoneMsg)
+	updated, refresh := updated.Update(done)
+	if refresh == nil {
+		t.Fatalf("expected refresh after set default")
+	}
+
+	if client.defaultMachine != "dev-machine" {
+		t.Fatalf("expected default machine dev-machine, got %q", client.defaultMachine)
 	}
 }
 

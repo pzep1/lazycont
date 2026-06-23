@@ -34,6 +34,8 @@ type Client interface {
 	InspectMachine(context.Context, string) (string, error)
 	ShellCommand(string, string) (*exec.Cmd, error)
 	MachineShellCommand(string) (*exec.Cmd, error)
+	CreateMachine(context.Context, string, string) error
+	SetDefaultMachine(context.Context, string) error
 	PullImage(context.Context, string) error
 	RunImage(context.Context, string, string) error
 	BuildImage(context.Context, string, string) error
@@ -98,6 +100,7 @@ const (
 	promptBuildImage
 	promptTagImage
 	promptCopy
+	promptCreateMachine
 )
 
 type pendingConfirm struct {
@@ -361,6 +364,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.pushSelectedImage()
 	case "c":
 		return m.startCopyPrompt()
+	case "M":
+		return m.startCreateMachinePrompt()
+	case "S":
+		return m.setDefaultMachine()
 	case "l":
 		return m.logsSelected()
 	case "f":
@@ -457,6 +464,17 @@ func (m Model) startCopyPrompt() (tea.Model, tea.Cmd) {
 	m.promptInput = ""
 	m.promptTarget = id
 	m.statusLine = "copy files for " + id
+	return m, nil
+}
+
+func (m Model) startCreateMachinePrompt() (tea.Model, tea.Cmd) {
+	if m.active != resourceMachines {
+		return m, nil
+	}
+	m.prompt = promptCreateMachine
+	m.promptInput = ""
+	m.promptTarget = ""
+	m.statusLine = "create machine"
 	return m, nil
 }
 
@@ -621,6 +639,25 @@ func (m Model) applyPrompt() (tea.Model, tea.Cmd) {
 			err := m.client.Copy(context.Background(), source, destination)
 			return actionDoneMsg{message: "copied files for " + container, err: err}
 		}
+	case promptCreateMachine:
+		image, name, ok := parseCreateMachineInput(m.promptInput)
+		m.prompt = promptNone
+		m.promptInput = ""
+		m.promptTarget = ""
+		if !ok {
+			m.statusLine = "machine create cancelled"
+			return m, nil
+		}
+		m.busy = "creating machine"
+		m.statusLine = "creating machine from " + image
+		return m, func() tea.Msg {
+			err := m.client.CreateMachine(context.Background(), image, name)
+			message := "created machine from " + image
+			if name != "" {
+				message = "created machine " + name
+			}
+			return actionDoneMsg{message: message, err: err}
+		}
 	default:
 		return m, nil
 	}
@@ -653,6 +690,18 @@ func expandSelectedContainerPath(path string, container string) string {
 		return strings.TrimSpace(container) + path
 	}
 	return path
+}
+
+func parseCreateMachineInput(input string) (string, string, bool) {
+	fields := strings.Fields(strings.TrimSpace(input))
+	if len(fields) == 0 || len(fields) > 2 {
+		return "", "", false
+	}
+	name := ""
+	if len(fields) == 2 {
+		name = fields[1]
+	}
+	return fields[0], name, true
 }
 
 func (m Model) handleConfirmKey(key string) (tea.Model, tea.Cmd) {
@@ -996,6 +1045,27 @@ func (m Model) pushSelectedImage() (tea.Model, tea.Cmd) {
 	}
 }
 
+func (m Model) setDefaultMachine() (tea.Model, tea.Cmd) {
+	if m.active != resourceMachines {
+		return m, nil
+	}
+	machine, ok := m.selectedMachine()
+	if !ok {
+		return m, nil
+	}
+	id := machine.Name()
+	if strings.TrimSpace(id) == "" {
+		m.statusLine = "set default cancelled"
+		return m, nil
+	}
+	m.busy = "setting default machine"
+	m.statusLine = "setting default machine " + id
+	return m, func() tea.Msg {
+		err := m.client.SetDefaultMachine(context.Background(), id)
+		return actionDoneMsg{message: "set default machine " + id, err: err}
+	}
+}
+
 func (m Model) lifecycleSelected(busy string, done string, action func(context.Context, string) error) (tea.Model, tea.Cmd) {
 	if m.active == resourceMachines && busy == "stopping" {
 		machine, ok := m.selectedMachine()
@@ -1302,7 +1372,7 @@ func (m Model) renderFooter() string {
 		return footerStyle.Width(m.width).Foreground(colorActive).Render(truncate(line, m.width-2))
 	}
 	if m.showHelp {
-		help := "tab switch | / filter | r refresh | u auto-refresh | a pull image | b build image | t tag image | P push image | R run image | i inspect | c copy files | l logs | f follow logs | e shell | s start | ctrl+r restart | x stop | K kill | d delete | p prune | q quit"
+		help := "tab switch | / filter | r refresh | u auto-refresh | a pull image | b build image | t tag image | P push image | R run image | M create machine | S default machine | i inspect | c copy files | l logs | f follow logs | e shell | s start | ctrl+r restart | x stop | K kill | d delete | p prune | q quit"
 		return footerStyle.Width(m.width).Render(truncate(help, m.width-2))
 	}
 	status := m.statusLine
@@ -1337,6 +1407,8 @@ func (m Model) promptLine() string {
 		return "new tag for " + m.promptTarget + ": " + m.promptInput + "  enter tag, esc cancel"
 	case promptCopy:
 		return "copy for " + m.promptTarget + " src dest (:path is selected container): " + m.promptInput + "  enter copy, esc cancel"
+	case promptCreateMachine:
+		return "machine image [name]: " + m.promptInput + "  enter create, name optional, esc cancel"
 	default:
 		return ""
 	}

@@ -313,6 +313,34 @@ func TestMachineCommandsUseSelectedMachineID(t *testing.T) {
 	}
 }
 
+func TestCreateMachineUsesPlainProgressAndOptionalName(t *testing.T) {
+	runner := &fakeRunner{}
+	client := &Client{Binary: "container", Runner: runner, Timeout: time.Second}
+
+	if err := client.CreateMachine(context.Background(), "alpine:3.22", "dev-machine"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantArgs := []string{"machine", "create", "--progress", "plain", "--name", "dev-machine", "alpine:3.22"}
+	if !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("args mismatch\nwant: %#v\n got: %#v", wantArgs, runner.args)
+	}
+}
+
+func TestSetDefaultMachineUsesSelectedMachineID(t *testing.T) {
+	runner := &fakeRunner{}
+	client := &Client{Binary: "container", Runner: runner, Timeout: time.Second}
+
+	if err := client.SetDefaultMachine(context.Background(), "dev-machine"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantArgs := []string{"machine", "set-default", "dev-machine"}
+	if !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("args mismatch\nwant: %#v\n got: %#v", wantArgs, runner.args)
+	}
+}
+
 func TestFollowLogsCommandUsesFollowWithTail(t *testing.T) {
 	client := &Client{Binary: "container"}
 

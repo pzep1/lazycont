@@ -185,6 +185,29 @@ func (c *Client) MachineShellCommand(id string) (*exec.Cmd, error) {
 	return exec.Command(c.binaryName(), "machine", "run", "--interactive", "--tty", "--name", id), nil
 }
 
+func (c *Client) CreateMachine(ctx context.Context, image string, name string) error {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return errors.New("machine image is required")
+	}
+	args := []string{"machine", "create", "--progress", "plain"}
+	if strings.TrimSpace(name) != "" {
+		args = append(args, "--name", strings.TrimSpace(name))
+	}
+	args = append(args, image)
+	_, err := c.runLong(ctx, args...)
+	return err
+}
+
+func (c *Client) SetDefaultMachine(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("machine id is required")
+	}
+	_, err := c.run(ctx, "machine", "set-default", id)
+	return err
+}
+
 func (c *Client) PullImage(ctx context.Context, reference string) error {
 	reference = strings.TrimSpace(reference)
 	if reference == "" {
