@@ -1120,6 +1120,63 @@ func TestCustomCommandPromptRequiresConfiguredCommands(t *testing.T) {
 	}
 }
 
+func TestOpenConfigUsesConfiguredEditorCommand(t *testing.T) {
+	client := &fakeClient{}
+	var openedPath string
+	model := NewWithOptions(client, Options{
+		ConfigPath: "/tmp/lazycont/config.json",
+		OpenConfigCommand: func(path string) (*exec.Cmd, error) {
+			openedPath = path
+			return exec.Command("true"), nil
+		},
+		LoadConfigCommands: func() ([]CustomCommand, error) {
+			return []CustomCommand{{
+				Name: "Images",
+				Args: []string{"image", "list"},
+			}}, nil
+		},
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	if cmd == nil {
+		t.Fatalf("expected config editor command")
+	}
+	if openedPath != "/tmp/lazycont/config.json" {
+		t.Fatalf("opened path = %q", openedPath)
+	}
+	if updated.(Model).busy != "editing config" {
+		t.Fatalf("busy = %q", updated.(Model).busy)
+	}
+	if updated.(Model).statusLine != "editing config" {
+		t.Fatalf("statusLine = %q", updated.(Model).statusLine)
+	}
+
+	updated, cmd = updated.Update(configEditedMsg{path: "/tmp/lazycont/config.json"})
+	if cmd != nil {
+		t.Fatalf("expected no command after config reload")
+	}
+	state := updated.(Model)
+	if state.statusLine != "edited config /tmp/lazycont/config.json" {
+		t.Fatalf("statusLine = %q", state.statusLine)
+	}
+	if len(state.customCommands) != 1 || state.customCommands[0].Name != "Images" {
+		t.Fatalf("custom commands were not reloaded: %#v", state.customCommands)
+	}
+}
+
+func TestOpenConfigRequiresEditorCommand(t *testing.T) {
+	client := &fakeClient{}
+	model := NewWithOptions(client, Options{ConfigPath: "/tmp/lazycont/config.json"})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	if cmd != nil {
+		t.Fatalf("expected no command")
+	}
+	if updated.(Model).statusLine != "config editor unavailable" {
+		t.Fatalf("statusLine = %q", updated.(Model).statusLine)
+	}
+}
+
 func TestRestartRequiresRunningContainer(t *testing.T) {
 	client := &fakeClient{}
 	model := New(client)

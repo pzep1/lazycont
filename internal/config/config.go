@@ -19,6 +19,11 @@ type Command struct {
 	Args []string `json:"args"`
 }
 
+const Starter = `{
+  "commands": []
+}
+`
+
 func DefaultPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -34,6 +39,21 @@ func LoadDefault() (Config, string, error) {
 	}
 	cfg, err := Load(path)
 	return cfg, path, err
+}
+
+func Ensure(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("config path is required")
+	}
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(Starter), 0o600)
 }
 
 func Load(path string) (Config, error) {

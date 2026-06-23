@@ -152,8 +152,11 @@ type pendingConfirm struct {
 }
 
 type Options struct {
-	CustomCommands []CustomCommand
-	StartupWarning string
+	CustomCommands     []CustomCommand
+	ConfigPath         string
+	OpenConfigCommand  func(string) (*exec.Cmd, error)
+	LoadConfigCommands func() ([]CustomCommand, error)
+	StartupWarning     string
 }
 
 type CustomCommand struct {
@@ -209,6 +212,9 @@ type Model struct {
 	autoRefresh     bool
 	refreshInterval time.Duration
 	customCommands  []CustomCommand
+	configPath      string
+	openConfig      func(string) (*exec.Cmd, error)
+	loadConfig      func() ([]CustomCommand, error)
 }
 
 type snapshotMsg struct {
@@ -248,6 +254,11 @@ type followLogsFinishedMsg struct {
 	err error
 }
 
+type configEditedMsg struct {
+	path string
+	err  error
+}
+
 type autoRefreshMsg time.Time
 
 const defaultRefreshInterval = 5 * time.Second
@@ -284,6 +295,9 @@ func NewWithOptions(client Client, opts Options) Model {
 		autoRefresh:     true,
 		refreshInterval: defaultRefreshInterval,
 		customCommands:  commands,
+		configPath:      opts.ConfigPath,
+		openConfig:      opts.OpenConfigCommand,
+		loadConfig:      opts.LoadConfigCommands,
 	}
 }
 
@@ -364,6 +378,24 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.statusLine = "log follow exited " + msg.id
 		return m, m.refreshCmd()
+	case configEditedMsg:
+		m.busy = ""
+		m.err = msg.err
+		if msg.err != nil {
+			m.statusLine = msg.err.Error()
+			return m, nil
+		}
+		if m.loadConfig != nil {
+			commands, err := m.loadConfig()
+			if err != nil {
+				m.err = err
+				m.statusLine = "config reload failed: " + err.Error()
+				return m, nil
+			}
+			m.customCommands = append([]CustomCommand(nil), commands...)
+		}
+		m.statusLine = "edited config " + msg.path
+		return m, nil
 	case autoRefreshMsg:
 		return m.handleAutoRefresh()
 	case tea.MouseMsg:
@@ -634,6 +666,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.statusLine = "auto-refresh off"
 		return m, nil
+	case "o":
+		return m.openConfigSelected()
 	case "up", "k":
 		m.moveSelection(-1)
 		return m, nil
@@ -2072,6 +2106,29 @@ func (m Model) machineShellSelected() (tea.Model, tea.Cmd) {
 	})
 }
 
+func (m Model) openConfigSelected() (tea.Model, tea.Cmd) {
+	if m.openConfig == nil {
+		m.statusLine = "config editor unavailable"
+		return m, nil
+	}
+	if strings.TrimSpace(m.configPath) == "" {
+		m.statusLine = "config path unavailable"
+		return m, nil
+	}
+	cmd, err := m.openConfig(m.configPath)
+	if err != nil {
+		m.err = err
+		m.statusLine = err.Error()
+		return m, nil
+	}
+	m.busy = "editing config"
+	m.statusLine = "editing config"
+	path := m.configPath
+	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return configEditedMsg{path: path, err: err}
+	})
+}
+
 func (m Model) restartSelected() (tea.Model, tea.Cmd) {
 	if m.active != resourceContainers {
 		return m, nil
@@ -2542,7 +2599,7 @@ func (m Model) renderFooter() string {
 		return footerStyle.Width(m.width).Foreground(colorActive).Render(truncate(line, m.width-2))
 	}
 	if m.showHelp {
-		help := "tab switch | / filter | : container command | ; custom command | r refresh | u auto-refresh | a pull image | b build image | t tag image | P push image | O save image | L load image | R run image | N create container | g registry login | C create volume/network | M create machine | m machine settings | S default machine | i inspect | c copy files | E export container | l logs | f follow logs | e shell | X exec command | s start | ctrl+r restart | x stop | K kill | d delete/logout | p prune | q quit"
+		help := "tab switch | / filter | : container command | ; custom command | o open config | r refresh | u auto-refresh | a pull image | b build image | t tag image | P push image | O save image | L load image | R run image | N create container | g registry login | C create volume/network | M create machine | m machine settings | S default machine | i inspect | c copy files | E export container | l logs | f follow logs | e shell | X exec command | s start | ctrl+r restart | x stop | K kill | d delete/logout | p prune | q quit"
 		return footerStyle.Width(m.width).Render(truncate(help, m.width-2))
 	}
 	status := m.statusLine

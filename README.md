@@ -16,6 +16,7 @@ This is an early usable slice focused on day-to-day container work:
 - scan container CPU and memory directly in the container list
 - run ad-hoc Apple `container` commands without leaving the TUI
 - run named custom Apple `container` commands from config
+- open the lazycont config file from the TUI
 - view image variant and layer history
 - tail container, machine, or system logs
 - follow container, machine, or system logs in the terminal
@@ -78,6 +79,7 @@ go build -o bin/lazycont ./cmd/lazycont
 | mouse wheel | Scroll details/log output or move the resource selection |
 | `:` | Run an ad-hoc Apple `container` command, such as `image list --format json` |
 | `;` | Run a named custom Apple `container` command from config |
+| `o` | Open the lazycont config file in `$VISUAL`, `$EDITOR`, or `vi` |
 | `r` | Refresh lists and status |
 | `u` | Toggle periodic auto-refresh |
 | `a` | Pull an image by reference |
@@ -131,3 +133,5 @@ lazycont reads optional custom commands from `~/Library/Application Support/lazy
 ```
 
 Press `;` in the TUI and enter a command number, exact name, or unique part of a name. Each entry runs as `container <args>`.
+
+Press `o` in the TUI to create this file if needed and open it in your editor.

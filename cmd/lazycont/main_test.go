@@ -107,3 +107,23 @@ func TestCustomCommandsCopiesConfigCommands(t *testing.T) {
 		t.Fatalf("customCommands did not copy args: %#v", got)
 	}
 }
+
+func TestEditorCommandAppendsConfigPath(t *testing.T) {
+	cmd, err := editorCommand("code --wait", "/tmp/lazycont/config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd.Path != "code" {
+		t.Fatalf("Path = %q, want code", cmd.Path)
+	}
+	wantArgs := []string{"code", "--wait", "/tmp/lazycont/config.json"}
+	if !reflect.DeepEqual(cmd.Args, wantArgs) {
+		t.Fatalf("Args mismatch\nwant: %#v\n got: %#v", wantArgs, cmd.Args)
+	}
+}
+
+func TestEditorCommandRequiresEditor(t *testing.T) {
+	if _, err := editorCommand(" ", "/tmp/lazycont/config.json"); err == nil || !strings.Contains(err.Error(), "editor is required") {
+		t.Fatalf("err = %v, want editor validation error", err)
+	}
+}

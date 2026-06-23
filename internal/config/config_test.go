@@ -63,6 +63,45 @@ func TestLoadRejectsTrailingJSONData(t *testing.T) {
 	}
 }
 
+func TestEnsureCreatesStarterConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lazycont", "config.json")
+
+	if err := Ensure(path); err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != Starter {
+		t.Fatalf("starter config mismatch\nwant: %q\n got: %q", Starter, string(body))
+	}
+}
+
+func TestEnsureLeavesExistingConfigAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeConfig(t, path, `{"commands":[{"name":"Images","args":["image","list"]}]}`)
+
+	if err := Ensure(path); err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(body); !strings.Contains(got, `"Images"`) {
+		t.Fatalf("existing config was replaced: %s", got)
+	}
+}
+
+func TestEnsureRequiresPath(t *testing.T) {
+	if err := Ensure(""); err == nil || !strings.Contains(err.Error(), "config path is required") {
+		t.Fatalf("err = %v, want path validation error", err)
+	}
+}
+
 func writeConfig(t *testing.T, path string, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {

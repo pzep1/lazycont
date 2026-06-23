@@ -1,9 +1,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -64,12 +67,46 @@ func runTUI(stderr io.Writer) int {
 	} else {
 		opts.CustomCommands = customCommands(cfg.Commands)
 	}
+	opts.ConfigPath = path
+	opts.OpenConfigCommand = openConfigCommand
+	opts.LoadConfigCommands = loadConfigCommands
 	program := tea.NewProgram(tui.NewWithOptions(client, opts), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(stderr, "lazycont: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+func openConfigCommand(path string) (*exec.Cmd, error) {
+	if err := appconfig.Ensure(path); err != nil {
+		return nil, err
+	}
+	editor := strings.TrimSpace(os.Getenv("VISUAL"))
+	if editor == "" {
+		editor = strings.TrimSpace(os.Getenv("EDITOR"))
+	}
+	if editor == "" {
+		editor = "vi"
+	}
+	return editorCommand(editor, path)
+}
+
+func editorCommand(editor string, path string) (*exec.Cmd, error) {
+	parts := strings.Fields(editor)
+	if len(parts) == 0 {
+		return nil, errors.New("editor is required")
+	}
+	args := append(append([]string(nil), parts[1:]...), path)
+	return exec.Command(parts[0], args...), nil
+}
+
+func loadConfigCommands() ([]tui.CustomCommand, error) {
+	cfg, _, err := appconfig.LoadDefault()
+	if err != nil {
+		return nil, err
+	}
+	return customCommands(cfg.Commands), nil
 }
 
 func configWarning(path string, err error) string {
