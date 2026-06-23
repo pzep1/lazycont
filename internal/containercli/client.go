@@ -381,6 +381,34 @@ func (c *Client) DeleteImage(ctx context.Context, image string, force bool) erro
 	return err
 }
 
+func (c *Client) CreateVolume(ctx context.Context, name string, size string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("volume name is required")
+	}
+	args := []string{"volume", "create"}
+	if strings.TrimSpace(size) != "" {
+		args = append(args, "-s", strings.TrimSpace(size))
+	}
+	args = append(args, name)
+	_, err := c.run(ctx, args...)
+	return err
+}
+
+func (c *Client) CreateNetwork(ctx context.Context, name string, subnet string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("network name is required")
+	}
+	args := []string{"network", "create"}
+	if strings.TrimSpace(subnet) != "" {
+		args = append(args, "--subnet", strings.TrimSpace(subnet))
+	}
+	args = append(args, name)
+	_, err := c.run(ctx, args...)
+	return err
+}
+
 func (c *Client) DeleteVolume(ctx context.Context, volume string) error {
 	_, err := c.run(ctx, "volume", "delete", volume)
 	return err

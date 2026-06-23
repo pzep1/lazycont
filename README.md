@@ -23,6 +23,7 @@ This is an early usable slice focused on day-to-day container work:
 - pull images and run selected images as detached containers
 - start, restart, stop, kill, and delete containers
 - create, stop, delete, and set default machines
+- create volumes and networks
 - prune stopped containers and unused images, volumes, or networks
 - delete images, volumes, networks, or machines
 - auto-refresh Apple container system status, lists, and one-shot stats
@@ -64,6 +65,7 @@ go build -o bin/lazycont ./cmd/lazycont
 | `R` | Run the selected image detached, with an optional name |
 | `M` | Create a machine from the machines pane as `<image> [name]` |
 | `S` | Set selected machine as the default machine |
+| `C` | Create a volume as `<name> [size]` or network as `<name> [subnet]` from its pane |
 | `i` / `enter` | Inspect selected resource |
 | `c` | Copy files for the selected container as `<src> <dest>`; use `:/path` for the selected container |
 | `E` | Export selected container filesystem to a tar archive |

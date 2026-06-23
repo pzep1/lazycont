@@ -40,6 +40,10 @@ type fakeClient struct {
 	defaultMachine string
 	stoppedMachine string
 	deleted        string
+	createdVolume  string
+	volumeSize     string
+	createdNetwork string
+	networkSubnet  string
 	deletedVolume  string
 	deletedNetwork string
 	deletedMachine string
@@ -265,6 +269,18 @@ func (f *fakeClient) DeleteContainer(_ context.Context, id string, _ bool) error
 }
 
 func (f *fakeClient) DeleteImage(context.Context, string, bool) error {
+	return nil
+}
+
+func (f *fakeClient) CreateVolume(_ context.Context, name string, size string) error {
+	f.createdVolume = name
+	f.volumeSize = size
+	return nil
+}
+
+func (f *fakeClient) CreateNetwork(_ context.Context, name string, subnet string) error {
+	f.createdNetwork = name
+	f.networkSubnet = subnet
 	return nil
 }
 
@@ -1161,14 +1177,87 @@ func TestExportSelectedContainerUsesDefaultTarPath(t *testing.T) {
 	}
 }
 
+func TestCreateVolumePromptUsesNameAndOptionalSize(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 110, Height: 24})
+	updated, _ = updated.Update(snapshotMsg{system: containercli.SystemStatus{Status: "running"}})
+	updated = switchToVolumes(t, updated)
+
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'C'}})
+	for _, r := range "cache 10G" {
+		updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("expected create volume command")
+	}
+	done := cmd().(actionDoneMsg)
+	updated, refresh := updated.Update(done)
+	if refresh == nil {
+		t.Fatalf("expected refresh after create volume")
+	}
+
+	if client.createdVolume != "cache" {
+		t.Fatalf("expected created volume cache, got %q", client.createdVolume)
+	}
+	if client.volumeSize != "10G" {
+		t.Fatalf("expected volume size 10G, got %q", client.volumeSize)
+	}
+}
+
+func TestCreateNetworkPromptUsesNameAndOptionalSubnet(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 110, Height: 24})
+	updated, _ = updated.Update(snapshotMsg{system: containercli.SystemStatus{Status: "running"}})
+	updated = switchToNetworks(t, updated)
+
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'C'}})
+	for _, r := range "frontend 192.168.90.0/24" {
+		updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("expected create network command")
+	}
+	done := cmd().(actionDoneMsg)
+	updated, refresh := updated.Update(done)
+	if refresh == nil {
+		t.Fatalf("expected refresh after create network")
+	}
+
+	if client.createdNetwork != "frontend" {
+		t.Fatalf("expected created network frontend, got %q", client.createdNetwork)
+	}
+	if client.networkSubnet != "192.168.90.0/24" {
+		t.Fatalf("expected network subnet, got %q", client.networkSubnet)
+	}
+}
+
+func switchToVolumes(t *testing.T, model tea.Model) tea.Model {
+	t.Helper()
+	return switchTabs(t, model, 2)
+}
+
+func switchToNetworks(t *testing.T, model tea.Model) tea.Model {
+	t.Helper()
+	return switchTabs(t, model, 3)
+}
+
 func switchToMachines(t *testing.T, model tea.Model) tea.Model {
 	t.Helper()
+	return switchTabs(t, model, 4)
+}
+
+func switchTabs(t *testing.T, model tea.Model, count int) tea.Model {
+	t.Helper()
 	updated := model
-	for range 4 {
+	for range count {
 		var cmd tea.Cmd
 		updated, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 		if cmd != nil {
-			t.Fatalf("expected no command while tabbing to machines")
+			t.Fatalf("expected no command while tabbing")
 		}
 	}
 	return updated

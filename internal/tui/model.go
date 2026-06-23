@@ -53,6 +53,8 @@ type Client interface {
 	Kill(context.Context, string) error
 	DeleteContainer(context.Context, string, bool) error
 	DeleteImage(context.Context, string, bool) error
+	CreateVolume(context.Context, string, string) error
+	CreateNetwork(context.Context, string, string) error
 	DeleteVolume(context.Context, string) error
 	DeleteNetwork(context.Context, string) error
 	DeleteMachine(context.Context, string) error
@@ -109,6 +111,8 @@ const (
 	promptExecCommand
 	promptSaveImage
 	promptLoadImage
+	promptCreateVolume
+	promptCreateNetwork
 )
 
 type pendingConfirm struct {
@@ -376,6 +380,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startLoadImagePrompt()
 	case "c":
 		return m.startCopyPrompt()
+	case "C":
+		return m.startCreateResourcePrompt()
 	case "E":
 		return m.startExportPrompt()
 	case "M":
@@ -554,6 +560,22 @@ func (m Model) startCreateMachinePrompt() (tea.Model, tea.Cmd) {
 	m.promptInput = ""
 	m.promptTarget = ""
 	m.statusLine = "create machine"
+	return m, nil
+}
+
+func (m Model) startCreateResourcePrompt() (tea.Model, tea.Cmd) {
+	switch m.active {
+	case resourceVolumes:
+		m.prompt = promptCreateVolume
+		m.promptInput = ""
+		m.promptTarget = ""
+		m.statusLine = "create volume"
+	case resourceNetworks:
+		m.prompt = promptCreateNetwork
+		m.promptInput = ""
+		m.promptTarget = ""
+		m.statusLine = "create network"
+	}
 	return m, nil
 }
 
@@ -785,6 +807,36 @@ func (m Model) applyPrompt() (tea.Model, tea.Cmd) {
 			err := m.client.LoadImage(context.Background(), inputPath)
 			return actionDoneMsg{message: "loaded image archive " + inputPath, err: err}
 		}
+	case promptCreateVolume:
+		name, size, ok := parseCreateResourceInput(m.promptInput)
+		m.prompt = promptNone
+		m.promptInput = ""
+		m.promptTarget = ""
+		if !ok {
+			m.statusLine = "volume create cancelled"
+			return m, nil
+		}
+		m.busy = "creating volume " + name
+		m.statusLine = "creating volume " + name
+		return m, func() tea.Msg {
+			err := m.client.CreateVolume(context.Background(), name, size)
+			return actionDoneMsg{message: "created volume " + name, err: err}
+		}
+	case promptCreateNetwork:
+		name, subnet, ok := parseCreateResourceInput(m.promptInput)
+		m.prompt = promptNone
+		m.promptInput = ""
+		m.promptTarget = ""
+		if !ok {
+			m.statusLine = "network create cancelled"
+			return m, nil
+		}
+		m.busy = "creating network " + name
+		m.statusLine = "creating network " + name
+		return m, func() tea.Msg {
+			err := m.client.CreateNetwork(context.Background(), name, subnet)
+			return actionDoneMsg{message: "created network " + name, err: err}
+		}
 	case promptCreateMachine:
 		image, name, ok := parseCreateMachineInput(m.promptInput)
 		m.prompt = promptNone
@@ -848,6 +900,18 @@ func parseCreateMachineInput(input string) (string, string, bool) {
 		name = fields[1]
 	}
 	return fields[0], name, true
+}
+
+func parseCreateResourceInput(input string) (string, string, bool) {
+	fields := strings.Fields(strings.TrimSpace(input))
+	if len(fields) == 0 || len(fields) > 2 {
+		return "", "", false
+	}
+	option := ""
+	if len(fields) == 2 {
+		option = fields[1]
+	}
+	return fields[0], option, true
 }
 
 func defaultContainerExportPath(id string) string {
@@ -1536,7 +1600,7 @@ func (m Model) renderFooter() string {
 		return footerStyle.Width(m.width).Foreground(colorActive).Render(truncate(line, m.width-2))
 	}
 	if m.showHelp {
-		help := "tab switch | / filter | r refresh | u auto-refresh | a pull image | b build image | t tag image | P push image | O save image | L load image | R run image | M create machine | S default machine | i inspect | c copy files | E export container | l logs | f follow logs | e shell | X exec command | s start | ctrl+r restart | x stop | K kill | d delete | p prune | q quit"
+		help := "tab switch | / filter | r refresh | u auto-refresh | a pull image | b build image | t tag image | P push image | O save image | L load image | R run image | C create volume/network | M create machine | S default machine | i inspect | c copy files | E export container | l logs | f follow logs | e shell | X exec command | s start | ctrl+r restart | x stop | K kill | d delete | p prune | q quit"
 		return footerStyle.Width(m.width).Render(truncate(help, m.width-2))
 	}
 	status := m.statusLine
@@ -1581,6 +1645,10 @@ func (m Model) promptLine() string {
 		return "save " + m.promptTarget + " to tar path: " + m.promptInput + "  enter save, ctrl+u clear, esc cancel"
 	case promptLoadImage:
 		return "load image archive path: " + m.promptInput + "  enter load, esc cancel"
+	case promptCreateVolume:
+		return "volume name [size]: " + m.promptInput + "  enter create, esc cancel"
+	case promptCreateNetwork:
+		return "network name [subnet]: " + m.promptInput + "  enter create, esc cancel"
 	default:
 		return ""
 	}

@@ -516,6 +516,34 @@ func TestExportContainerUsesOutputPath(t *testing.T) {
 	}
 }
 
+func TestCreateVolumeUsesNameAndOptionalSize(t *testing.T) {
+	runner := &fakeRunner{}
+	client := &Client{Binary: "container", Runner: runner, Timeout: time.Second}
+
+	if err := client.CreateVolume(context.Background(), "cache", "10G"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantArgs := []string{"volume", "create", "-s", "10G", "cache"}
+	if !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("args mismatch\nwant: %#v\n got: %#v", wantArgs, runner.args)
+	}
+}
+
+func TestCreateNetworkUsesNameAndOptionalSubnet(t *testing.T) {
+	runner := &fakeRunner{}
+	client := &Client{Binary: "container", Runner: runner, Timeout: time.Second}
+
+	if err := client.CreateNetwork(context.Background(), "frontend", "192.168.90.0/24"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantArgs := []string{"network", "create", "--subnet", "192.168.90.0/24", "frontend"}
+	if !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("args mismatch\nwant: %#v\n got: %#v", wantArgs, runner.args)
+	}
+}
+
 func TestRestartStopsThenStartsContainer(t *testing.T) {
 	runner := &fakeRunner{}
 	client := &Client{Binary: "container", Runner: runner, Timeout: time.Second}
