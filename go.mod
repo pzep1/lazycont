@@ -1,4 +1,4 @@
-module github.com/pz/lazycont
+module github.com/pzep1/lazycont
 
 go 1.26.4
 

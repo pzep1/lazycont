@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	appconfig "github.com/pz/lazycont/internal/config"
-	"github.com/pz/lazycont/internal/tui"
+	appconfig "github.com/pzep1/lazycont/internal/config"
+	"github.com/pzep1/lazycont/internal/tui"
 )
 
 func TestRunPrintsVersion(t *testing.T) {

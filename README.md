@@ -46,13 +46,17 @@ This is an early usable slice focused on day-to-day container work:
 
 ## Install
 
-Homebrew tap formula, once the tap is published:
-
 ```sh
-brew install --HEAD pz/lazycont/lazycont
+brew install pzep1/lazycont/lazycont
 ```
 
-The formula depends on Homebrew's Apple `container` package. It is HEAD-only until the first tagged release. See [docs/homebrew.md](docs/homebrew.md) for the tap publishing and stable release steps.
+This taps `pzep1/homebrew-lazycont` and builds lazycont from the latest tagged release. To track the development branch instead, use:
+
+```sh
+brew install --HEAD pzep1/lazycont/lazycont
+```
+
+The formula depends on Homebrew's Apple `container` package. See [docs/homebrew.md](docs/homebrew.md) for tap maintenance and release steps.
 
 ## Run From Source
 
@@ -137,3 +141,7 @@ Press `;` in the TUI and enter a command number, exact name, or unique part of a
 Custom command args can use `{container}`, `{image}`, `{volume}`, `{network}`, `{machine}`, `{registry}`, or `{resource}`. `{resource}` expands to the selected item in the active pane.
 
 Press `o` in the TUI to create this file if needed and open it in your editor.
+
+## License
+
+Released under the [GNU General Public License v3.0 or later](LICENSE).

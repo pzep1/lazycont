@@ -10,9 +10,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	appconfig "github.com/pz/lazycont/internal/config"
-	"github.com/pz/lazycont/internal/containercli"
-	"github.com/pz/lazycont/internal/tui"
+	appconfig "github.com/pzep1/lazycont/internal/config"
+	"github.com/pzep1/lazycont/internal/containercli"
+	"github.com/pzep1/lazycont/internal/tui"
 )
 
 var version = "dev"

@@ -14,7 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/pz/lazycont/internal/containercli"
+	"github.com/pzep1/lazycont/internal/containercli"
 )
 
 type Client interface {

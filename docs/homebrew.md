@@ -2,14 +2,14 @@
 
 `Formula/lazycont.rb` is a tap-ready Homebrew formula for installing lazycont from source.
 
-The formula is HEAD-only until the project has a tagged release archive and checksum. Homebrew core now ships Apple's `container` CLI as the `container` formula, so lazycont can depend on that package instead of asking users to install the CLI separately. Homebrew also requires formulae to live in a tap, so the first public packaging target should be a small tap such as `pz/homebrew-lazycont`.
+The formula is HEAD-only until the project has a tagged release archive and checksum. Homebrew core now ships Apple's `container` CLI as the `container` formula, so lazycont can depend on that package instead of asking users to install the CLI separately. Homebrew also requires formulae to live in a tap, so the first public packaging target should be a small tap such as `pzep1/homebrew-lazycont`.
 
 ## Formula smoke
 
 After the tap is published, install the formula from the tap:
 
 ```sh
-brew install --HEAD pz/lazycont/lazycont
+brew install --HEAD pzep1/lazycont/lazycont
 lazycont --version
 ```
 
@@ -32,16 +32,16 @@ container system start
 Create a tap repo named `homebrew-lazycont`, copy the formula into it, and install from the tap:
 
 ```sh
-brew tap-new pz/lazycont
-cp Formula/lazycont.rb "$(brew --repository pz/lazycont)/Formula/lazycont.rb"
-cd "$(brew --repository pz/lazycont)"
+brew tap-new pzep1/lazycont
+cp Formula/lazycont.rb "$(brew --repository pzep1/lazycont)/Formula/lazycont.rb"
+cd "$(brew --repository pzep1/lazycont)"
 brew style Formula/lazycont.rb
 git add Formula/lazycont.rb
 git commit -m "Add lazycont formula"
-git remote add origin git@github.com:pz/homebrew-lazycont.git
+git remote add origin git@github.com:pzep1/homebrew-lazycont.git
 git push -u origin main
-brew install --HEAD pz/lazycont/lazycont
-brew test pz/lazycont/lazycont
+brew install --HEAD pzep1/lazycont/lazycont
+brew test pzep1/lazycont/lazycont
 ```
 
 ## Add a stable release
@@ -49,16 +49,16 @@ brew test pz/lazycont/lazycont
 Once a first release is tagged, add a stable source archive to the formula:
 
 ```ruby
-url "https://github.com/pz/lazycont/archive/refs/tags/v0.1.0.tar.gz"
+url "https://github.com/pzep1/lazycont/archive/refs/tags/v0.1.0.tar.gz"
 sha256 "<tarball-sha256>"
 ```
 
 Then rerun:
 
 ```sh
-brew audit --strict --new --formula --tap pz/lazycont lazycont
-brew install --build-from-source pz/lazycont/lazycont
-brew test pz/lazycont/lazycont
+brew audit --strict --new --formula --tap pzep1/lazycont lazycont
+brew install --build-from-source pzep1/lazycont/lazycont
+brew test pzep1/lazycont/lazycont
 ```
 
 ## Release checklist
@@ -67,5 +67,5 @@ brew test pz/lazycont/lazycont
 - tag a release and create a GitHub release archive
 - add `url` and `sha256` to the formula
 - run `brew style Formula/lazycont.rb` inside the tap
-- run `brew audit --strict --new --formula --tap pz/lazycont lazycont`
-- run `brew test pz/lazycont/lazycont`
+- run `brew audit --strict --new --formula --tap pzep1/lazycont lazycont`
+- run `brew test pzep1/lazycont/lazycont`

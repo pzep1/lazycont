@@ -1,7 +1,8 @@
 class Lazycont < Formula
   desc "Lazydocker-style terminal UI for Apple's container CLI"
-  homepage "https://github.com/pz/lazycont"
-  head "https://github.com/pz/lazycont.git", branch: "main"
+  homepage "https://github.com/pzep1/lazycont"
+  license "GPL-3.0-or-later"
+  head "https://github.com/pzep1/lazycont.git", branch: "main"
 
   depends_on "go" => :build
   depends_on "container"

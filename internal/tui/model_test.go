@@ -11,7 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/pz/lazycont/internal/containercli"
+	"github.com/pzep1/lazycont/internal/containercli"
 )
 
 type fakeClient struct {
