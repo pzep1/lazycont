@@ -9,6 +9,7 @@ This is an early usable slice focused on day-to-day container work:
 - browse container machines
 - filter resource lists across names and metadata
 - inspect selected resources
+- view image variant and layer history
 - tail container or machine logs
 - follow container or machine logs in the terminal
 - view container CPU, memory, network, disk, and process metrics

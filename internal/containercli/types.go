@@ -103,9 +103,41 @@ type ImageConfiguration struct {
 }
 
 type ImageVariant struct {
-	Digest   string   `json:"digest"`
-	Platform Platform `json:"platform"`
-	Size     int64    `json:"size"`
+	Config   ImageVariantConfig `json:"config"`
+	Digest   string             `json:"digest"`
+	Platform Platform           `json:"platform"`
+	Size     int64              `json:"size"`
+}
+
+type ImageVariantConfig struct {
+	Architecture string         `json:"architecture"`
+	Config       ImageConfig    `json:"config"`
+	Created      string         `json:"created"`
+	History      []ImageHistory `json:"history"`
+	OS           string         `json:"os"`
+	RootFS       ImageRootFS    `json:"rootfs"`
+	Variant      string         `json:"variant"`
+}
+
+type ImageConfig struct {
+	Cmd        []string       `json:"Cmd"`
+	Entrypoint []string       `json:"Entrypoint"`
+	Env        []string       `json:"Env"`
+	Labels     map[string]any `json:"Labels"`
+	StopSignal string         `json:"StopSignal"`
+	WorkingDir string         `json:"WorkingDir"`
+}
+
+type ImageHistory struct {
+	Comment    string `json:"comment"`
+	Created    string `json:"created"`
+	CreatedBy  string `json:"created_by"`
+	EmptyLayer bool   `json:"empty_layer"`
+}
+
+type ImageRootFS struct {
+	DiffIDs []string `json:"diff_ids"`
+	Type    string   `json:"type"`
 }
 
 type Volume struct {

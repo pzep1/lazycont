@@ -70,7 +70,24 @@ func TestImagesParsesVariants(t *testing.T) {
 				"descriptor": {"digest": "sha256:abc", "size": 9218}
 			},
 			"variants": [
-				{"digest": "sha256:def", "platform": {"os": "linux", "architecture": "arm64", "variant": "v8"}, "size": 4203982}
+				{
+					"digest": "sha256:def",
+					"platform": {"os": "linux", "architecture": "arm64", "variant": "v8"},
+					"size": 4203982,
+					"config": {
+						"architecture": "arm64",
+						"os": "linux",
+						"variant": "v8",
+						"history": [
+							{"created_by": "ADD alpine-minirootfs-3.24.0-aarch64.tar.gz / # buildkit"},
+							{"created_by": "CMD [\"/bin/sh\"]", "empty_layer": true}
+						],
+						"rootfs": {
+							"type": "layers",
+							"diff_ids": ["sha256:375591c23c8de111a75382d674cf6688f56adecb5e3018d29ada57c10135db5e"]
+						}
+					}
+				}
 			]
 		}
 	]`)}
@@ -91,6 +108,12 @@ func TestImagesParsesVariants(t *testing.T) {
 	}
 	if images[0].Size() != "4.0 MB" {
 		t.Fatalf("unexpected size %q", images[0].Size())
+	}
+	if len(images[0].Variants[0].Config.History) != 2 {
+		t.Fatalf("expected image history entries, got %d", len(images[0].Variants[0].Config.History))
+	}
+	if len(images[0].Variants[0].Config.RootFS.DiffIDs) != 1 {
+		t.Fatalf("expected rootfs layer entries, got %d", len(images[0].Variants[0].Config.RootFS.DiffIDs))
 	}
 }
 

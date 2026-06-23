@@ -49,3 +49,32 @@ func TestStatSummaryLinesShowsCPUPercentWhenAvailable(t *testing.T) {
 		t.Fatalf("summary mismatch\nwant: %#v\n got: %#v", want, got)
 	}
 }
+
+func TestImageLayerHistoryLinesFormatsVerboseImageShape(t *testing.T) {
+	image := Image{
+		Configuration: ImageConfiguration{Name: "docker.io/library/alpine:latest"},
+		Variants: []ImageVariant{{
+			Platform: Platform{OS: "linux", Architecture: "arm64", Variant: "v8"},
+			Config: ImageVariantConfig{
+				History: []ImageHistory{
+					{CreatedBy: "ADD alpine-minirootfs-3.24.0-aarch64.tar.gz / # buildkit"},
+					{CreatedBy: "CMD [\"/bin/sh\"]", EmptyLayer: true},
+				},
+				RootFS: ImageRootFS{
+					DiffIDs: []string{"sha256:375591c23c8de111a75382d674cf6688f56adecb5e3018d29ada57c10135db5e"},
+					Type:    "layers",
+				},
+			},
+		}},
+	}
+
+	got := image.LayerHistoryLines()
+	want := []string{
+		"  linux/arm64/v8  2 history entries  1 filesystem layers",
+		"    375591c23c8d  ADD alpine-minirootfs-3.24.0-aarch64.tar.gz / # buildkit",
+		"    metadata  CMD [\"/bin/sh\"]",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("history mismatch\nwant: %#v\n got: %#v", want, got)
+	}
+}

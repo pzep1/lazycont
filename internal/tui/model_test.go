@@ -279,6 +279,43 @@ func TestContainerDetailsShowMetricSummary(t *testing.T) {
 	}
 }
 
+func TestImageDetailsShowLayerHistory(t *testing.T) {
+	model := New(&fakeClient{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 130, Height: 30})
+	updated, _ = updated.Update(snapshotMsg{
+		system: containercli.SystemStatus{Status: "running"},
+		images: []containercli.Image{{
+			ID: "abc",
+			Configuration: containercli.ImageConfiguration{
+				Name: "docker.io/library/alpine:latest",
+			},
+			Variants: []containercli.ImageVariant{{
+				Digest:   "sha256:def",
+				Platform: containercli.Platform{OS: "linux", Architecture: "arm64", Variant: "v8"},
+				Size:     4203982,
+				Config: containercli.ImageVariantConfig{
+					History: []containercli.ImageHistory{
+						{CreatedBy: "ADD alpine-minirootfs-3.24.0-aarch64.tar.gz / # buildkit"},
+						{CreatedBy: "CMD [\"/bin/sh\"]", EmptyLayer: true},
+					},
+					RootFS: containercli.ImageRootFS{
+						DiffIDs: []string{"sha256:375591c23c8de111a75382d674cf6688f56adecb5e3018d29ada57c10135db5e"},
+						Type:    "layers",
+					},
+				},
+			}},
+		}},
+	})
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+	view := updated.View()
+	for _, want := range []string{"Layer history", "linux/arm64/v8", "375591c23c8d", "metadata", "CMD [\"/bin/sh\"]"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view did not include %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestDeleteRequiresConfirmation(t *testing.T) {
 	client := &fakeClient{}
 	model := New(client)

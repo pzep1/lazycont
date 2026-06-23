@@ -165,6 +165,44 @@ func (i Image) DetailLines(now time.Time) []string {
 	for _, variant := range i.Variants {
 		lines = append(lines, fmt.Sprintf("  %s  %s  %s", formatPlatform(variant.Platform), FormatBytes(variant.Size), shortDigest(variant.Digest)))
 	}
+	if historyLines := i.LayerHistoryLines(); len(historyLines) > 0 {
+		lines = append(lines, "", "Layer history")
+		lines = append(lines, historyLines...)
+	}
+	return lines
+}
+
+func (i Image) LayerHistoryLines() []string {
+	var lines []string
+	for _, variant := range i.Variants {
+		if len(variant.Config.History) == 0 && len(variant.Config.RootFS.DiffIDs) == 0 {
+			continue
+		}
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		platform := formatPlatform(variant.Platform)
+		if platform == "-" {
+			platform = formatPlatform(Platform{OS: variant.Config.OS, Architecture: variant.Config.Architecture, Variant: variant.Config.Variant})
+		}
+		lines = append(lines, fmt.Sprintf("  %s  %d history entries  %d filesystem layers", emptyDash(platform), len(variant.Config.History), len(variant.Config.RootFS.DiffIDs)))
+		layerIndex := 0
+		for _, entry := range variant.Config.History {
+			layerID := "metadata"
+			if !entry.EmptyLayer && layerIndex < len(variant.Config.RootFS.DiffIDs) {
+				layerID = shortDigest(variant.Config.RootFS.DiffIDs[layerIndex])
+				layerIndex++
+			}
+			command := strings.TrimSpace(entry.CreatedBy)
+			if command == "" {
+				command = entry.Comment
+			}
+			lines = append(lines, fmt.Sprintf("    %s  %s", layerID, emptyDash(command)))
+		}
+		for ; layerIndex < len(variant.Config.RootFS.DiffIDs); layerIndex++ {
+			lines = append(lines, fmt.Sprintf("    %s  filesystem layer", shortDigest(variant.Config.RootFS.DiffIDs[layerIndex])))
+		}
+	}
 	return lines
 }
 
