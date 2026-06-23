@@ -325,6 +325,41 @@ func (m Machine) DetailLines(now time.Time) []string {
 	return lines
 }
 
+func (s Stat) SummaryLines() []string {
+	lines := []string{}
+	if cpuPercent, ok := firstNumberFromMap(s, "cpuPercent", "cpuPercentage", "cpuPercentUsage"); ok {
+		lines = append(lines, fmt.Sprintf("  CPU:      %s  %s", formatPercent(cpuPercent), metricBar(cpuPercent, 100, 16)))
+	} else if cpuUsec, ok := numberFromMap(s, "cpuUsageUsec"); ok {
+		lines = append(lines, "  CPU time: "+formatUsec(cpuUsec))
+	}
+
+	memoryUsage, hasMemoryUsage := numberFromMap(s, "memoryUsageBytes")
+	memoryLimit, hasMemoryLimit := numberFromMap(s, "memoryLimitBytes")
+	if hasMemoryUsage && hasMemoryLimit && memoryLimit > 0 {
+		percent := memoryUsage / memoryLimit * 100
+		lines = append(lines, fmt.Sprintf("  Memory:   %s / %s  %s %s", FormatBytes(int64(memoryUsage)), FormatBytes(int64(memoryLimit)), metricBar(memoryUsage, memoryLimit, 16), formatPercent(percent)))
+	} else if hasMemoryUsage {
+		lines = append(lines, "  Memory:   "+FormatBytes(int64(memoryUsage)))
+	}
+
+	networkRx, hasNetworkRx := numberFromMap(s, "networkRxBytes")
+	networkTx, hasNetworkTx := numberFromMap(s, "networkTxBytes")
+	if hasNetworkRx || hasNetworkTx {
+		lines = append(lines, fmt.Sprintf("  Network:  %s rx / %s tx", FormatBytes(int64(networkRx)), FormatBytes(int64(networkTx))))
+	}
+
+	blockRead, hasBlockRead := numberFromMap(s, "blockReadBytes")
+	blockWrite, hasBlockWrite := numberFromMap(s, "blockWriteBytes")
+	if hasBlockRead || hasBlockWrite {
+		lines = append(lines, fmt.Sprintf("  Block IO: %s read / %s write", FormatBytes(int64(blockRead)), FormatBytes(int64(blockWrite))))
+	}
+
+	if processes, ok := firstNumberFromMap(s, "numProcesses", "pids", "Pids"); ok {
+		lines = append(lines, fmt.Sprintf("  PIDs:     %.0f", processes))
+	}
+	return lines
+}
+
 func FormatBytes(bytes int64) string {
 	if bytes <= 0 {
 		return "-"
@@ -417,6 +452,43 @@ func boolLabel(value bool) string {
 	return "no"
 }
 
+func formatPercent(value float64) string {
+	return fmt.Sprintf("%.1f%%", value)
+}
+
+func formatUsec(value float64) string {
+	duration := time.Duration(value) * time.Microsecond
+	switch {
+	case duration < time.Second:
+		return fmt.Sprintf("%dms", duration.Milliseconds())
+	case duration < time.Minute:
+		return fmt.Sprintf("%.1fs", duration.Seconds())
+	default:
+		return fmt.Sprintf("%dm%02ds", int(duration.Minutes()), int(duration.Seconds())%60)
+	}
+}
+
+func metricBar(value float64, max float64, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if max <= 0 {
+		return "[" + strings.Repeat("-", width) + "]"
+	}
+	ratio := value / max
+	if ratio < 0 {
+		ratio = 0
+	}
+	if ratio > 1 {
+		ratio = 1
+	}
+	filled := int(ratio*float64(width) + 0.5)
+	if filled > width {
+		filled = width
+	}
+	return "[" + strings.Repeat("#", filled) + strings.Repeat("-", width-filled) + "]"
+}
+
 func stringFromMap(values map[string]any, key string) string {
 	if values == nil {
 		return ""
@@ -466,6 +538,15 @@ func numberFromMap(values map[string]any, key string) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func firstNumberFromMap(values map[string]any, keys ...string) (float64, bool) {
+	for _, key := range keys {
+		if value, ok := numberFromMap(values, key); ok {
+			return value, true
+		}
+	}
+	return 0, false
 }
 
 func numberFromNestedMap(values map[string]any, key string, nestedKey string) (float64, bool) {

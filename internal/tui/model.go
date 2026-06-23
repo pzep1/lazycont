@@ -1433,6 +1433,9 @@ func (m Model) statLines(containerID string) []string {
 		if !statMatches(stat, containerID) {
 			continue
 		}
+		if lines := stat.SummaryLines(); len(lines) > 0 {
+			return lines
+		}
 		keys := make([]string, 0, len(stat))
 		for key := range stat {
 			keys = append(keys, key)

@@ -247,6 +247,38 @@ func TestModelLoadsSnapshotIntoView(t *testing.T) {
 	}
 }
 
+func TestContainerDetailsShowMetricSummary(t *testing.T) {
+	model := New(&fakeClient{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 34})
+	updated, _ = updated.Update(snapshotMsg{
+		system: containercli.SystemStatus{Status: "running"},
+		containers: []containercli.Container{
+			testContainerWithState("web", "docker.io/library/nginx:latest", "running"),
+		},
+		stats: []containercli.Stat{{
+			"id":               "web",
+			"memoryUsageBytes": float64(47431680),
+			"memoryLimitBytes": float64(1073741824),
+			"cpuUsageUsec":     float64(1234567),
+			"networkRxBytes":   float64(1289011),
+			"networkTxBytes":   float64(876544),
+			"blockReadBytes":   float64(4718592),
+			"blockWriteBytes":  float64(2202009),
+			"numProcesses":     float64(3),
+		}},
+	})
+
+	view := updated.View()
+	for _, want := range []string{"Stats", "CPU time: 1.2s", "Memory:", "[#---------------]", "Network:", "PIDs:     3"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view did not include %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "memoryUsageBytes") {
+		t.Fatalf("view rendered raw stats instead of summary:\n%s", view)
+	}
+}
+
 func TestDeleteRequiresConfirmation(t *testing.T) {
 	client := &fakeClient{}
 	model := New(client)

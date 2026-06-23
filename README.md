@@ -11,6 +11,7 @@ This is an early usable slice focused on day-to-day container work:
 - inspect selected resources
 - tail container or machine logs
 - follow container or machine logs in the terminal
+- view container CPU, memory, network, disk, and process metrics
 - pull images and run selected images as detached containers
 - start, restart, stop, kill, and delete containers
 - stop and delete machines
