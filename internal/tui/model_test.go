@@ -17,6 +17,8 @@ type fakeClient struct {
 	pulled         string
 	runImage       string
 	runName        string
+	buildTag       string
+	buildContext   string
 	restarted      string
 	followLogsID   string
 	machineLogsID  string
@@ -159,6 +161,12 @@ func (f *fakeClient) PullImage(_ context.Context, reference string) error {
 func (f *fakeClient) RunImage(_ context.Context, image string, name string) error {
 	f.runImage = image
 	f.runName = name
+	return nil
+}
+
+func (f *fakeClient) BuildImage(_ context.Context, tag string, contextDir string) error {
+	f.buildTag = tag
+	f.buildContext = contextDir
 	return nil
 }
 
@@ -704,6 +712,60 @@ func TestRunSelectedImagePromptsForOptionalName(t *testing.T) {
 	}
 	if client.runName != "scratch" {
 		t.Fatalf("expected container name scratch, got %q", client.runName)
+	}
+}
+
+func TestBuildImagePromptBuildsWithDefaultContext(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 110, Height: 24})
+	updated, _ = updated.Update(snapshotMsg{system: containercli.SystemStatus{Status: "running"}})
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	for _, r := range "registry.example.com/app:dev" {
+		updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("expected build command")
+	}
+	done := cmd().(actionDoneMsg)
+	updated, refresh := updated.Update(done)
+	if refresh == nil {
+		t.Fatalf("expected refresh after build")
+	}
+
+	if client.buildTag != "registry.example.com/app:dev" {
+		t.Fatalf("expected build tag, got %q", client.buildTag)
+	}
+	if client.buildContext != "." {
+		t.Fatalf("expected default build context, got %q", client.buildContext)
+	}
+}
+
+func TestBuildImagePromptBuildsWithProvidedContext(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 110, Height: 24})
+	updated, _ = updated.Update(snapshotMsg{system: containercli.SystemStatus{Status: "running"}})
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	for _, r := range "registry.example.com/app:dev ./services/api" {
+		updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("expected build command")
+	}
+	done := cmd().(actionDoneMsg)
+	updated, refresh := updated.Update(done)
+	if refresh == nil {
+		t.Fatalf("expected refresh after build")
+	}
+
+	if client.buildTag != "registry.example.com/app:dev" {
+		t.Fatalf("expected build tag, got %q", client.buildTag)
+	}
+	if client.buildContext != "./services/api" {
+		t.Fatalf("expected provided build context, got %q", client.buildContext)
 	}
 }
 

@@ -358,6 +358,34 @@ func TestRunImageUsesDetachedContainerWithOptionalName(t *testing.T) {
 	}
 }
 
+func TestBuildImageUsesPlainProgressAndDefaultContext(t *testing.T) {
+	runner := &fakeRunner{}
+	client := &Client{Binary: "container", Runner: runner, Timeout: time.Second}
+
+	if err := client.BuildImage(context.Background(), "registry.example.com/app:dev", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	wantArgs := []string{"build", "--progress", "plain", "--tag", "registry.example.com/app:dev", "."}
+	if !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("args mismatch\nwant: %#v\n got: %#v", wantArgs, runner.args)
+	}
+}
+
+func TestBuildImageUsesProvidedContext(t *testing.T) {
+	runner := &fakeRunner{}
+	client := &Client{Binary: "container", Runner: runner, Timeout: time.Second}
+
+	if err := client.BuildImage(context.Background(), "registry.example.com/app:dev", "./services/api"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantArgs := []string{"build", "--progress", "plain", "--tag", "registry.example.com/app:dev", "./services/api"}
+	if !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("args mismatch\nwant: %#v\n got: %#v", wantArgs, runner.args)
+	}
+}
+
 func TestRestartStopsThenStartsContainer(t *testing.T) {
 	runner := &fakeRunner{}
 	client := &Client{Binary: "container", Runner: runner, Timeout: time.Second}

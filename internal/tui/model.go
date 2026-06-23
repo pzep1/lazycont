@@ -36,6 +36,7 @@ type Client interface {
 	MachineShellCommand(string) (*exec.Cmd, error)
 	PullImage(context.Context, string) error
 	RunImage(context.Context, string, string) error
+	BuildImage(context.Context, string, string) error
 	Start(context.Context, string) error
 	Stop(context.Context, string) error
 	Restart(context.Context, string) error
@@ -91,6 +92,7 @@ const (
 	promptNone promptKind = iota
 	promptPullImage
 	promptRunImage
+	promptBuildImage
 )
 
 type pendingConfirm struct {
@@ -344,6 +346,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.inspectSelected()
 	case "a":
 		return m.startPullPrompt(), nil
+	case "b":
+		return m.startBuildPrompt(), nil
 	case "R":
 		return m.startRunPrompt()
 	case "l":
@@ -404,6 +408,14 @@ func (m Model) startRunPrompt() (tea.Model, tea.Cmd) {
 	m.promptTarget = image.Name()
 	m.statusLine = "run image " + image.Name()
 	return m, nil
+}
+
+func (m Model) startBuildPrompt() Model {
+	m.prompt = promptBuildImage
+	m.promptInput = ""
+	m.promptTarget = ""
+	m.statusLine = "build image"
+	return m
 }
 
 func (m Model) startFiltering() Model {
@@ -520,9 +532,38 @@ func (m Model) applyPrompt() (tea.Model, tea.Cmd) {
 			}
 			return actionDoneMsg{message: message, err: err}
 		}
+	case promptBuildImage:
+		tag, contextDir := parseBuildImageInput(m.promptInput)
+		m.prompt = promptNone
+		m.promptInput = ""
+		m.promptTarget = ""
+		if tag == "" {
+			m.statusLine = "build cancelled"
+			return m, nil
+		}
+		m.busy = "building " + tag
+		m.statusLine = "building " + tag
+		return m, func() tea.Msg {
+			err := m.client.BuildImage(context.Background(), tag, contextDir)
+			return actionDoneMsg{message: "built image " + tag, err: err}
+		}
 	default:
 		return m, nil
 	}
+}
+
+func parseBuildImageInput(input string) (string, string) {
+	trimmed := strings.TrimSpace(input)
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return "", ""
+	}
+	tag := fields[0]
+	contextDir := strings.TrimSpace(strings.TrimPrefix(trimmed, tag))
+	if contextDir == "" {
+		contextDir = "."
+	}
+	return tag, contextDir
 }
 
 func (m Model) handleConfirmKey(key string) (tea.Model, tea.Cmd) {
@@ -1151,7 +1192,7 @@ func (m Model) renderFooter() string {
 		return footerStyle.Width(m.width).Foreground(colorActive).Render(truncate(line, m.width-2))
 	}
 	if m.showHelp {
-		help := "tab switch | / filter | r refresh | u auto-refresh | a pull image | R run image | i inspect | l logs | f follow logs | e shell | s start | ctrl+r restart | x stop | K kill | d delete | p prune | q quit"
+		help := "tab switch | / filter | r refresh | u auto-refresh | a pull image | b build image | R run image | i inspect | l logs | f follow logs | e shell | s start | ctrl+r restart | x stop | K kill | d delete | p prune | q quit"
 		return footerStyle.Width(m.width).Render(truncate(help, m.width-2))
 	}
 	status := m.statusLine
@@ -1180,6 +1221,8 @@ func (m Model) promptLine() string {
 		return "pull image: " + m.promptInput + "  enter pull, esc cancel"
 	case promptRunImage:
 		return "container name for " + m.promptTarget + ": " + m.promptInput + "  enter run, blank auto, esc cancel"
+	case promptBuildImage:
+		return "build image tag [context-dir]: " + m.promptInput + "  enter build, context defaults ., esc cancel"
 	default:
 		return ""
 	}

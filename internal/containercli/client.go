@@ -208,6 +208,19 @@ func (c *Client) RunImage(ctx context.Context, image string, name string) error 
 	return err
 }
 
+func (c *Client) BuildImage(ctx context.Context, tag string, contextDir string) error {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return errors.New("image tag is required")
+	}
+	contextDir = strings.TrimSpace(contextDir)
+	if contextDir == "" {
+		contextDir = "."
+	}
+	_, err := c.runLong(ctx, "build", "--progress", "plain", "--tag", tag, contextDir)
+	return err
+}
+
 func (c *Client) Start(ctx context.Context, id string) error {
 	_, err := c.run(ctx, "start", id)
 	return err
