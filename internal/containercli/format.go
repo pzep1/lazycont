@@ -363,6 +363,50 @@ func (m Machine) DetailLines(now time.Time) []string {
 	return lines
 }
 
+func (r RegistryLogin) Name() string {
+	return firstNonEmpty(
+		r.Server,
+		r.Registry,
+		r.Hostname,
+		stringFromMap(r.Raw, "server"),
+		stringFromMap(r.Raw, "registry"),
+		stringFromMap(r.Raw, "hostname"),
+		stringFromMap(r.Raw, "host"),
+		r.Value,
+	)
+}
+
+func (r RegistryLogin) User() string {
+	return firstNonEmpty(
+		r.Username,
+		stringFromMap(r.Raw, "username"),
+		stringFromMap(r.Raw, "user"),
+	)
+}
+
+func (r RegistryLogin) RegistryScheme() string {
+	return firstNonEmpty(
+		r.Scheme,
+		stringFromMap(r.Raw, "scheme"),
+	)
+}
+
+func (r RegistryLogin) DetailLines() []string {
+	lines := []string{
+		"Registry login",
+		"  Server:   " + emptyDash(r.Name()),
+		"  Username: " + emptyDash(r.User()),
+		"  Scheme:   " + emptyDash(r.RegistryScheme()),
+	}
+	if len(r.Raw) > 0 {
+		lines = append(lines, "", "Raw")
+		for _, entry := range sortedMapLines(r.Raw) {
+			lines = append(lines, "  "+entry)
+		}
+	}
+	return lines
+}
+
 func (s Stat) SummaryLines() []string {
 	lines := []string{}
 	if cpuPercent, ok := firstNumberFromMap(s, "cpuPercent", "cpuPercentage", "cpuPercentUsage"); ok {

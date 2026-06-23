@@ -78,6 +78,12 @@ func (c *Client) Machines(ctx context.Context) ([]Machine, error) {
 	return machines, err
 }
 
+func (c *Client) Registries(ctx context.Context) ([]RegistryLogin, error) {
+	var registries []RegistryLogin
+	err := c.runJSON(ctx, &registries, "registry", "list", "--format", "json")
+	return registries, err
+}
+
 func (c *Client) Stats(ctx context.Context, containerIDs ...string) ([]Stat, error) {
 	args := append([]string{"stats"}, containerIDs...)
 	args = append(args, "--format", "json", "--no-stream")
@@ -312,6 +318,28 @@ func (c *Client) LoadImage(ctx context.Context, inputPath string) error {
 		return errors.New("image archive path is required")
 	}
 	_, err := c.runLong(ctx, "image", "load", "--input", inputPath)
+	return err
+}
+
+func (c *Client) RegistryLoginCommand(server string, username string) (*exec.Cmd, error) {
+	server = strings.TrimSpace(server)
+	if server == "" {
+		return nil, errors.New("registry server is required")
+	}
+	args := []string{"registry", "login"}
+	if strings.TrimSpace(username) != "" {
+		args = append(args, "--username", strings.TrimSpace(username))
+	}
+	args = append(args, server)
+	return exec.Command(c.binaryName(), args...), nil
+}
+
+func (c *Client) LogoutRegistry(ctx context.Context, registry string) error {
+	registry = strings.TrimSpace(registry)
+	if registry == "" {
+		return errors.New("registry server is required")
+	}
+	_, err := c.run(ctx, "registry", "logout", registry)
 	return err
 }
 

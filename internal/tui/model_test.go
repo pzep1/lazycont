@@ -41,6 +41,9 @@ type fakeClient struct {
 	machineName    string
 	defaultMachine string
 	stoppedMachine string
+	registryLogin  string
+	registryUser   string
+	registryLogout string
 	deleted        string
 	createdVolume  string
 	volumeSize     string
@@ -119,6 +122,14 @@ func (f *fakeClient) Machines(context.Context) ([]containercli.Machine, error) {
 			},
 		},
 		Status: map[string]any{"state": "running"},
+	}}, nil
+}
+
+func (f *fakeClient) Registries(context.Context) ([]containercli.RegistryLogin, error) {
+	return []containercli.RegistryLogin{{
+		Server:   "ghcr.io",
+		Username: "alice",
+		Scheme:   "https",
 	}}, nil
 }
 
@@ -236,6 +247,17 @@ func (f *fakeClient) LoadImage(_ context.Context, inputPath string) error {
 	return nil
 }
 
+func (f *fakeClient) RegistryLoginCommand(server string, username string) (*exec.Cmd, error) {
+	f.registryLogin = server
+	f.registryUser = username
+	return exec.Command("true"), nil
+}
+
+func (f *fakeClient) LogoutRegistry(_ context.Context, registry string) error {
+	f.registryLogout = registry
+	return nil
+}
+
 func (f *fakeClient) Copy(_ context.Context, source string, destination string) error {
 	f.copySource = source
 	f.copyDest = destination
@@ -340,7 +362,7 @@ func TestModelLoadsSnapshotIntoView(t *testing.T) {
 	if !strings.Contains(view, "containers 1") {
 		t.Fatalf("view did not include container count:\n%s", view)
 	}
-	if !strings.Contains(view, "volumes 1") || !strings.Contains(view, "networks 1") || !strings.Contains(view, "machines 1") {
+	if !strings.Contains(view, "volumes 1") || !strings.Contains(view, "networks 1") || !strings.Contains(view, "machines 1") || !strings.Contains(view, "registries 1") {
 		t.Fatalf("view did not include secondary resource counts:\n%s", view)
 	}
 }
@@ -796,6 +818,68 @@ func TestMachinePaneShowsAndActionsUseSelectedMachine(t *testing.T) {
 	updated, _ = updated.Update(deleteDone)
 	if client.deletedMachine != "dev-machine" {
 		t.Fatalf("expected deleted machine dev-machine, got %q", client.deletedMachine)
+	}
+}
+
+func TestRegistryPaneShowsAndLogoutUsesSelectedRegistry(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	msg := model.refreshCmd()().(snapshotMsg)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 110, Height: 24})
+	updated, _ = updated.Update(msg)
+	updated = switchToRegistries(t, updated)
+
+	view := updated.View()
+	if !strings.Contains(view, "registries 1") {
+		t.Fatalf("view did not include registry count:\n%s", view)
+	}
+	if !strings.Contains(view, "ghcr.io") || !strings.Contains(view, "alice") {
+		t.Fatalf("view did not include selected registry:\n%s", view)
+	}
+
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	if cmd != nil {
+		t.Fatalf("expected registry inspect to use local details")
+	}
+	if !strings.Contains(updated.View(), "Registry login") {
+		t.Fatalf("view did not show registry details:\n%s", updated.View())
+	}
+
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Fatalf("expected registry logout confirmation command")
+	}
+	done := cmd().(actionDoneMsg)
+	updated, refresh := updated.Update(done)
+	if refresh == nil {
+		t.Fatalf("expected refresh after registry logout")
+	}
+	if client.registryLogout != "ghcr.io" {
+		t.Fatalf("expected registry logout ghcr.io, got %q", client.registryLogout)
+	}
+}
+
+func TestRegistryLoginPromptRunsInteractiveCommand(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 110, Height: 24})
+	updated, _ = updated.Update(snapshotMsg{system: containercli.SystemStatus{Status: "running"}})
+	updated = switchToRegistries(t, updated)
+
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	for _, r := range "registry.example.com alice" {
+		updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("expected registry login exec command")
+	}
+	if client.registryLogin != "registry.example.com" {
+		t.Fatalf("expected registry login server, got %q", client.registryLogin)
+	}
+	if client.registryUser != "alice" {
+		t.Fatalf("expected registry login user, got %q", client.registryUser)
 	}
 }
 
@@ -1292,6 +1376,11 @@ func switchToNetworks(t *testing.T, model tea.Model) tea.Model {
 func switchToMachines(t *testing.T, model tea.Model) tea.Model {
 	t.Helper()
 	return switchTabs(t, model, 4)
+}
+
+func switchToRegistries(t *testing.T, model tea.Model) tea.Model {
+	t.Helper()
+	return switchTabs(t, model, 5)
 }
 
 func switchTabs(t *testing.T, model tea.Model, count int) tea.Model {

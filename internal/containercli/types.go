@@ -195,4 +195,30 @@ func (m *Machine) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &m.Raw)
 }
 
+type RegistryLogin struct {
+	Server   string         `json:"server"`
+	Registry string         `json:"registry"`
+	Hostname string         `json:"hostname"`
+	Username string         `json:"username"`
+	Scheme   string         `json:"scheme"`
+	Raw      map[string]any `json:"-"`
+	Value    string         `json:"-"`
+}
+
+func (r *RegistryLogin) UnmarshalJSON(data []byte) error {
+	var value string
+	if err := json.Unmarshal(data, &value); err == nil {
+		r.Value = value
+		return nil
+	}
+
+	type registryLoginAlias RegistryLogin
+	var alias registryLoginAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*r = RegistryLogin(alias)
+	return json.Unmarshal(data, &r.Raw)
+}
+
 type Stat map[string]any

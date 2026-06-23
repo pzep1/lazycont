@@ -236,6 +236,39 @@ func TestMachinesParsesFlexibleAppleJSONShape(t *testing.T) {
 	}
 }
 
+func TestRegistriesParsesAppleJSONShape(t *testing.T) {
+	runner := &fakeRunner{output: []byte(`[
+		{"server":"ghcr.io","username":"alice","scheme":"https"},
+		"docker.io"
+	]`)}
+	client := &Client{Binary: "container", Runner: runner, Timeout: time.Second}
+
+	registries, err := client.Registries(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(registries) != 2 {
+		t.Fatalf("expected 2 registry logins, got %d", len(registries))
+	}
+	if registries[0].Name() != "ghcr.io" {
+		t.Fatalf("unexpected registry name %q", registries[0].Name())
+	}
+	if registries[0].User() != "alice" {
+		t.Fatalf("unexpected registry user %q", registries[0].User())
+	}
+	if registries[0].RegistryScheme() != "https" {
+		t.Fatalf("unexpected registry scheme %q", registries[0].RegistryScheme())
+	}
+	if registries[1].Name() != "docker.io" {
+		t.Fatalf("unexpected string registry name %q", registries[1].Name())
+	}
+
+	wantArgs := []string{"registry", "list", "--format", "json"}
+	if !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("args mismatch\nwant: %#v\n got: %#v", wantArgs, runner.args)
+	}
+}
+
 func TestShellCommandUsesInteractiveTTYExec(t *testing.T) {
 	client := &Client{Binary: "container"}
 
@@ -266,6 +299,34 @@ func TestExecRunsShellCommandInContainer(t *testing.T) {
 	}
 
 	wantArgs := []string{"exec", "db", "/bin/sh", "-lc", "cat /etc/os-release"}
+	if !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("args mismatch\nwant: %#v\n got: %#v", wantArgs, runner.args)
+	}
+}
+
+func TestRegistryLoginCommandUsesServerAndOptionalUsername(t *testing.T) {
+	client := &Client{Binary: "container"}
+
+	cmd, err := client.RegistryLoginCommand("ghcr.io", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantArgs := []string{"registry", "login", "--username", "alice", "ghcr.io"}
+	if !reflect.DeepEqual(cmd.Args[1:], wantArgs) {
+		t.Fatalf("args mismatch\nwant: %#v\n got: %#v", wantArgs, cmd.Args[1:])
+	}
+}
+
+func TestLogoutRegistryUsesSelectedRegistry(t *testing.T) {
+	runner := &fakeRunner{}
+	client := &Client{Binary: "container", Runner: runner, Timeout: time.Second}
+
+	if err := client.LogoutRegistry(context.Background(), "ghcr.io"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantArgs := []string{"registry", "logout", "ghcr.io"}
 	if !reflect.DeepEqual(runner.args, wantArgs) {
 		t.Fatalf("args mismatch\nwant: %#v\n got: %#v", wantArgs, runner.args)
 	}

@@ -7,6 +7,7 @@ This is an early usable slice focused on day-to-day container work:
 - browse containers and images
 - browse volumes and networks
 - browse container machines
+- browse registry logins
 - filter resource lists across names and metadata
 - inspect selected resources
 - view image variant and layer history
@@ -20,6 +21,7 @@ This is an early usable slice focused on day-to-day container work:
 - retag selected images
 - save and load image archives
 - push selected images to a registry
+- log in to and out of registries
 - pull images, create stopped containers, and run selected images as detached containers
 - start, restart, stop, kill, and delete containers
 - create, stop, delete, and set default machines
@@ -49,7 +51,7 @@ go build -o bin/lazycont ./cmd/lazycont
 
 | Key | Action |
 | --- | --- |
-| `tab` | Switch between containers, images, volumes, networks, and machines |
+| `tab` | Switch between containers, images, volumes, networks, machines, and registries |
 | `/` | Filter resource lists |
 | `esc` | Clear the active filter |
 | `up` / `k` | Move selection up |
@@ -64,6 +66,7 @@ go build -o bin/lazycont ./cmd/lazycont
 | `L` | Load an image from an OCI tar archive |
 | `R` | Run the selected image detached, with an optional name |
 | `N` | Create a stopped container from the selected image, with an optional name |
+| `g` | Log in to a registry from the registries pane as `<server> [username]` |
 | `M` | Create a machine from the machines pane as `<image> [name]` |
 | `S` | Set selected machine as the default machine |
 | `C` | Create a volume as `<name> [size]` or network as `<name> [subnet]` from its pane |
@@ -78,7 +81,7 @@ go build -o bin/lazycont ./cmd/lazycont
 | `ctrl+r` | Restart selected running container |
 | `x` | Stop selected container or machine |
 | `K` | Kill selected container |
-| `d` | Delete selected container, image, volume, network, or machine, with confirmation |
+| `d` | Delete selected container, image, volume, network, or machine, or log out of selected registry, with confirmation |
 | `p` | Prune stopped containers or unused images, volumes, or networks, with confirmation |
 | `?` | Toggle help |
 | `q` / `ctrl+c` | Quit |

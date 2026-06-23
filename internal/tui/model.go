@@ -22,6 +22,7 @@ type Client interface {
 	Volumes(context.Context) ([]containercli.Volume, error)
 	Networks(context.Context) ([]containercli.NetworkResource, error)
 	Machines(context.Context) ([]containercli.Machine, error)
+	Registries(context.Context) ([]containercli.RegistryLogin, error)
 	Stats(context.Context, ...string) ([]containercli.Stat, error)
 	Logs(context.Context, string, int) (string, error)
 	FollowLogsCommand(string, int) (*exec.Cmd, error)
@@ -45,6 +46,8 @@ type Client interface {
 	PushImage(context.Context, string) error
 	SaveImage(context.Context, string, string) error
 	LoadImage(context.Context, string) error
+	RegistryLoginCommand(string, string) (*exec.Cmd, error)
+	LogoutRegistry(context.Context, string) error
 	Copy(context.Context, string, string) error
 	ExportContainer(context.Context, string, string) error
 	Start(context.Context, string) error
@@ -73,6 +76,8 @@ const (
 	resourceVolumes
 	resourceNetworks
 	resourceMachines
+	resourceRegistries
+	resourceCount
 )
 
 type panelMode int
@@ -96,6 +101,7 @@ const (
 	confirmPruneVolumes
 	confirmPruneNetworks
 	confirmDeleteMachine
+	confirmLogoutRegistry
 )
 
 type promptKind int
@@ -115,6 +121,7 @@ const (
 	promptLoadImage
 	promptCreateVolume
 	promptCreateNetwork
+	promptRegistryLogin
 )
 
 type pendingConfirm struct {
@@ -135,12 +142,14 @@ type Model struct {
 	volumeCursor    int
 	networkCursor   int
 	machineCursor   int
+	registryCursor  int
 
 	containers []containercli.Container
 	images     []containercli.Image
 	volumes    []containercli.Volume
 	networks   []containercli.NetworkResource
 	machines   []containercli.Machine
+	registries []containercli.RegistryLogin
 	stats      []containercli.Stat
 	system     containercli.SystemStatus
 
@@ -173,6 +182,7 @@ type snapshotMsg struct {
 	volumes    []containercli.Volume
 	networks   []containercli.NetworkResource
 	machines   []containercli.Machine
+	registries []containercli.RegistryLogin
 	stats      []containercli.Stat
 	err        error
 	updated    time.Time
@@ -232,6 +242,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.volumes = msg.volumes
 		m.networks = msg.networks
 		m.machines = msg.machines
+		m.registries = msg.registries
 		m.stats = msg.stats
 		m.err = msg.err
 		m.lastUpdated = msg.updated
@@ -329,7 +340,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showHelp = !m.showHelp
 		return m, nil
 	case "tab":
-		m.active = (m.active + 1) % 5
+		m.active = (m.active + 1) % resourceCount
 		m.resetPanel()
 		return m, nil
 	case "r":
@@ -382,6 +393,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startSaveImagePrompt()
 	case "L":
 		return m.startLoadImagePrompt()
+	case "g":
+		return m.startRegistryLoginPrompt()
 	case "c":
 		return m.startCopyPrompt()
 	case "C":
@@ -516,6 +529,17 @@ func (m Model) startLoadImagePrompt() (tea.Model, tea.Cmd) {
 	m.promptInput = ""
 	m.promptTarget = ""
 	m.statusLine = "load image archive"
+	return m, nil
+}
+
+func (m Model) startRegistryLoginPrompt() (tea.Model, tea.Cmd) {
+	if m.active != resourceRegistries {
+		return m, nil
+	}
+	m.prompt = promptRegistryLogin
+	m.promptInput = ""
+	m.promptTarget = ""
+	m.statusLine = "registry login"
 	return m, nil
 }
 
@@ -846,6 +870,26 @@ func (m Model) applyPrompt() (tea.Model, tea.Cmd) {
 			err := m.client.LoadImage(context.Background(), inputPath)
 			return actionDoneMsg{message: "loaded image archive " + inputPath, err: err}
 		}
+	case promptRegistryLogin:
+		server, username, ok := parseRegistryLoginInput(m.promptInput)
+		m.prompt = promptNone
+		m.promptInput = ""
+		m.promptTarget = ""
+		if !ok {
+			m.statusLine = "registry login cancelled"
+			return m, nil
+		}
+		cmd, err := m.client.RegistryLoginCommand(server, username)
+		if err != nil {
+			m.err = err
+			m.statusLine = err.Error()
+			return m, nil
+		}
+		m.busy = "logging in to registry " + server
+		m.statusLine = "logging in to registry " + server
+		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return actionDoneMsg{message: "logged in registry " + server, err: err}
+		})
 	case promptCreateVolume:
 		name, size, ok := parseCreateResourceInput(m.promptInput)
 		m.prompt = promptNone
@@ -953,6 +997,18 @@ func parseCreateResourceInput(input string) (string, string, bool) {
 	return fields[0], option, true
 }
 
+func parseRegistryLoginInput(input string) (string, string, bool) {
+	fields := strings.Fields(strings.TrimSpace(input))
+	if len(fields) == 0 || len(fields) > 2 {
+		return "", "", false
+	}
+	username := ""
+	if len(fields) == 2 {
+		username = fields[1]
+	}
+	return fields[0], username, true
+}
+
 func defaultContainerExportPath(id string) string {
 	name := strings.TrimSpace(id)
 	if name == "" {
@@ -1045,6 +1101,14 @@ func (m Model) refreshCmd() tea.Cmd {
 				return machines[i].Name() < machines[j].Name()
 			})
 			msg.machines = machines
+		}
+		if registries, err := m.client.Registries(ctx); err != nil {
+			errs = append(errs, err)
+		} else {
+			sort.Slice(registries, func(i, j int) bool {
+				return registries[i].Name() < registries[j].Name()
+			})
+			msg.registries = registries
 		}
 		if stats, err := m.client.Stats(ctx); err == nil {
 			msg.stats = stats
@@ -1142,6 +1206,18 @@ func (m Model) inspectSelected() (tea.Model, tea.Cmd) {
 			body, err := m.client.InspectMachine(context.Background(), id)
 			return outputMsg{title: "Inspect " + id, body: body, err: err}
 		}
+	case resourceRegistries:
+		registry, ok := m.selectedRegistry()
+		if !ok {
+			return m, nil
+		}
+		name := registry.Name()
+		m.panelMode = panelInspect
+		m.panelTitle = "Registry " + name
+		m.panelBody = strings.Join(registry.DetailLines(), "\n")
+		m.panelOffset = 0
+		m.statusLine = "loaded registry " + name
+		return m, nil
 	}
 	return m, nil
 }
@@ -1395,6 +1471,12 @@ func (m *Model) prepareDelete() {
 			id := machine.Name()
 			m.confirm = &pendingConfirm{action: confirmDeleteMachine, target: id, label: "Delete machine " + id + "?"}
 		}
+	case resourceRegistries:
+		registry, ok := m.selectedRegistry()
+		if ok {
+			name := registry.Name()
+			m.confirm = &pendingConfirm{action: confirmLogoutRegistry, target: name, label: "Log out from registry " + name + "?"}
+		}
 	}
 }
 
@@ -1429,6 +1511,9 @@ func (m Model) confirmCmd(confirm pendingConfirm) tea.Cmd {
 		case confirmDeleteMachine:
 			err := m.client.DeleteMachine(ctx, confirm.target)
 			return actionDoneMsg{message: "deleted machine " + confirm.target, err: err}
+		case confirmLogoutRegistry:
+			err := m.client.LogoutRegistry(ctx, confirm.target)
+			return actionDoneMsg{message: "logged out registry " + confirm.target, err: err}
 		default:
 			return actionDoneMsg{err: errors.New("unknown action")}
 		}
@@ -1447,6 +1532,8 @@ func (m *Model) moveSelection(delta int) {
 		m.networkCursor += delta
 	case resourceMachines:
 		m.machineCursor += delta
+	case resourceRegistries:
+		m.registryCursor += delta
 	}
 	m.clampCursors()
 	m.resetPanel()
@@ -1458,6 +1545,7 @@ func (m *Model) clampCursors() {
 	m.volumeCursor = clamp(m.volumeCursor, 0, len(m.filteredVolumeIndexes())-1)
 	m.networkCursor = clamp(m.networkCursor, 0, len(m.filteredNetworkIndexes())-1)
 	m.machineCursor = clamp(m.machineCursor, 0, len(m.filteredMachineIndexes())-1)
+	m.registryCursor = clamp(m.registryCursor, 0, len(m.filteredRegistryIndexes())-1)
 }
 
 func (m *Model) resetPanel() {
@@ -1510,6 +1598,14 @@ func (m Model) selectedMachine() (containercli.Machine, bool) {
 		return containercli.Machine{}, false
 	}
 	return m.machines[indexes[m.machineCursor]], true
+}
+
+func (m Model) selectedRegistry() (containercli.RegistryLogin, bool) {
+	indexes := m.filteredRegistryIndexes()
+	if len(indexes) == 0 || m.registryCursor < 0 || m.registryCursor >= len(indexes) {
+		return containercli.RegistryLogin{}, false
+	}
+	return m.registries[indexes[m.registryCursor]], true
 }
 
 func joinErrors(errs []error) error {
@@ -1639,7 +1735,7 @@ func (m Model) renderFooter() string {
 		return footerStyle.Width(m.width).Foreground(colorActive).Render(truncate(line, m.width-2))
 	}
 	if m.showHelp {
-		help := "tab switch | / filter | r refresh | u auto-refresh | a pull image | b build image | t tag image | P push image | O save image | L load image | R run image | N create container | C create volume/network | M create machine | S default machine | i inspect | c copy files | E export container | l logs | f follow logs | e shell | X exec command | s start | ctrl+r restart | x stop | K kill | d delete | p prune | q quit"
+		help := "tab switch | / filter | r refresh | u auto-refresh | a pull image | b build image | t tag image | P push image | O save image | L load image | R run image | N create container | g registry login | C create volume/network | M create machine | S default machine | i inspect | c copy files | E export container | l logs | f follow logs | e shell | X exec command | s start | ctrl+r restart | x stop | K kill | d delete/logout | p prune | q quit"
 		return footerStyle.Width(m.width).Render(truncate(help, m.width-2))
 	}
 	status := m.statusLine
@@ -1690,6 +1786,8 @@ func (m Model) promptLine() string {
 		return "volume name [size]: " + m.promptInput + "  enter create, esc cancel"
 	case promptCreateNetwork:
 		return "network name [subnet]: " + m.promptInput + "  enter create, esc cancel"
+	case promptRegistryLogin:
+		return "registry server [username]: " + m.promptInput + "  enter login, esc cancel"
 	default:
 		return ""
 	}
@@ -1715,6 +1813,8 @@ func (m Model) renderSidebar(width int, height int) string {
 		lines = append(lines, m.renderNetworkList(width-4, listHeight)...)
 	case resourceMachines:
 		lines = append(lines, m.renderMachineList(width-4, listHeight)...)
+	case resourceRegistries:
+		lines = append(lines, m.renderRegistryList(width-4, listHeight)...)
 	}
 	return style.Render(strings.Join(lines, "\n"))
 }
@@ -1725,7 +1825,8 @@ func (m Model) renderTabs() string {
 	volumes := m.tabLabel("volumes", len(m.filteredVolumeIndexes()), len(m.volumes))
 	networks := m.tabLabel("networks", len(m.filteredNetworkIndexes()), len(m.networks))
 	machines := m.tabLabel("machines", len(m.filteredMachineIndexes()), len(m.machines))
-	tabs := []string{containers, images, volumes, networks, machines}
+	registries := m.tabLabel("registries", len(m.filteredRegistryIndexes()), len(m.registries))
+	tabs := []string{containers, images, volumes, networks, machines, registries}
 	for idx := range tabs {
 		label := " " + tabs[idx] + " "
 		if resourceKind(idx) == m.active {
@@ -1734,7 +1835,7 @@ func (m Model) renderTabs() string {
 			tabs[idx] = mutedStyle.Render(label)
 		}
 	}
-	return strings.Join(tabs[:2], " ") + "\n" + strings.Join(tabs[2:], " ")
+	return strings.Join(tabs[:3], " ") + "\n" + strings.Join(tabs[3:], " ")
 }
 
 func (m Model) tabLabel(name string, filtered int, total int) string {
@@ -1873,6 +1974,30 @@ func (m Model) renderMachineList(width int, height int) []string {
 	return rows
 }
 
+func (m Model) renderRegistryList(width int, height int) []string {
+	indexes := m.filteredRegistryIndexes()
+	if len(indexes) == 0 {
+		return []string{mutedStyle.Render(m.emptyListMessage("registries"))}
+	}
+	rows := []string{mutedStyle.Render(fitColumns("registry", "user", width))}
+	start := visibleStart(m.registryCursor, height-1, len(indexes))
+	end := start + height - 1
+	if end > len(indexes) {
+		end = len(indexes)
+	}
+	for idx := start; idx < end; idx++ {
+		registry := m.registries[indexes[idx]]
+		name := truncate(registry.Name(), 34)
+		meta := emptyDash(registry.User())
+		line := fitColumns(name, meta, width)
+		if idx == m.registryCursor {
+			line = selectedStyle.Width(width).Render(truncate(line, width))
+		}
+		rows = append(rows, line)
+	}
+	return rows
+}
+
 func (m Model) emptyListMessage(kind string) string {
 	if activeFilter(m.filter) == "" {
 		return "No " + kind + " found."
@@ -1933,6 +2058,12 @@ func (m Model) panelContent() (string, string) {
 			return "Details", "No machine selected."
 		}
 		return "Details " + machine.Name(), strings.Join(machine.DetailLines(now), "\n")
+	case resourceRegistries:
+		registry, ok := m.selectedRegistry()
+		if !ok {
+			return "Details", "No registry selected."
+		}
+		return "Details " + registry.Name(), strings.Join(registry.DetailLines(), "\n")
 	default:
 		return "Details", ""
 	}
@@ -2009,6 +2140,17 @@ func (m Model) filteredMachineIndexes() []int {
 	indexes := make([]int, 0, len(m.machines))
 	for idx, machine := range m.machines {
 		if filter == "" || matchFields(filter, machine.Name(), machine.State(), machine.Image(), machine.CPUs(), machine.Memory()) {
+			indexes = append(indexes, idx)
+		}
+	}
+	return indexes
+}
+
+func (m Model) filteredRegistryIndexes() []int {
+	filter := activeFilter(m.filter)
+	indexes := make([]int, 0, len(m.registries))
+	for idx, registry := range m.registries {
+		if filter == "" || matchFields(filter, registry.Name(), registry.User(), registry.RegistryScheme()) {
 			indexes = append(indexes, idx)
 		}
 	}
