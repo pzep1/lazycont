@@ -1045,6 +1045,81 @@ func TestContainerCommandPromptRunsAdHocContainerCommand(t *testing.T) {
 	}
 }
 
+func TestCustomCommandPromptRunsConfiguredCommandByNumber(t *testing.T) {
+	client := &fakeClient{}
+	model := NewWithOptions(client, Options{
+		CustomCommands: []CustomCommand{{
+			Name: "Images",
+			Args: []string{"image", "list", "--format", "json"},
+		}},
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{';'}})
+	if !strings.Contains(updated.View(), "1=Images") {
+		t.Fatalf("view did not show custom command choices:\n%s", updated.View())
+	}
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("expected custom command")
+	}
+	output := cmd().(outputMsg)
+	updated, _ = updated.Update(output)
+
+	wantArgs := []string{"image", "list", "--format", "json"}
+	if !reflect.DeepEqual(client.commandArgs, wantArgs) {
+		t.Fatalf("command args mismatch\nwant: %#v\n got: %#v", wantArgs, client.commandArgs)
+	}
+	if !strings.Contains(updated.View(), "Custom Images") || !strings.Contains(updated.View(), "command output") {
+		t.Fatalf("view did not show custom command output:\n%s", updated.View())
+	}
+}
+
+func TestCustomCommandPromptRunsConfiguredCommandByUniqueName(t *testing.T) {
+	client := &fakeClient{}
+	model := NewWithOptions(client, Options{
+		CustomCommands: []CustomCommand{{
+			Name: "System disk",
+			Args: []string{"system", "df"},
+		}, {
+			Name: "Image list",
+			Args: []string{"image", "list"},
+		}},
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{';'}})
+	for _, r := range "disk" {
+		updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	_, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("expected custom command")
+	}
+	_ = cmd().(outputMsg)
+
+	wantArgs := []string{"system", "df"}
+	if !reflect.DeepEqual(client.commandArgs, wantArgs) {
+		t.Fatalf("command args mismatch\nwant: %#v\n got: %#v", wantArgs, client.commandArgs)
+	}
+}
+
+func TestCustomCommandPromptRequiresConfiguredCommands(t *testing.T) {
+	client := &fakeClient{}
+	model := New(client)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{';'}})
+	if cmd != nil {
+		t.Fatalf("expected no command")
+	}
+	state := updated.(Model)
+	if state.prompt != promptNone {
+		t.Fatalf("prompt = %v, want none", state.prompt)
+	}
+	if state.statusLine != "no custom commands configured" {
+		t.Fatalf("statusLine = %q", state.statusLine)
+	}
+}
+
 func TestRestartRequiresRunningContainer(t *testing.T) {
 	client := &fakeClient{}
 	model := New(client)

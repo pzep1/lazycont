@@ -2,8 +2,13 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
+
+	appconfig "github.com/pz/lazycont/internal/config"
+	"github.com/pz/lazycont/internal/tui"
 )
 
 func TestRunPrintsVersion(t *testing.T) {
@@ -71,5 +76,34 @@ func TestRunRejectsTrailingArgument(t *testing.T) {
 	}
 	if got := stderr.String(); !strings.Contains(got, `unexpected argument "extra"`) || !strings.Contains(got, "Usage:") {
 		t.Fatalf("stderr = %q, want error and usage", got)
+	}
+}
+
+func TestConfigWarningIncludesPathWhenAvailable(t *testing.T) {
+	got := configWarning("/tmp/lazycont/config.json", errors.New("bad json"))
+	want := "config /tmp/lazycont/config.json: bad json"
+	if got != want {
+		t.Fatalf("configWarning = %q, want %q", got, want)
+	}
+}
+
+func TestCustomCommandsCopiesConfigCommands(t *testing.T) {
+	commands := []appconfig.Command{{
+		Name: "Images",
+		Args: []string{"image", "list"},
+	}}
+
+	got := customCommands(commands)
+	want := []tui.CustomCommand{{
+		Name: "Images",
+		Args: []string{"image", "list"},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("customCommands mismatch\nwant: %#v\n got: %#v", want, got)
+	}
+
+	commands[0].Args[0] = "mutated"
+	if got[0].Args[0] != "image" {
+		t.Fatalf("customCommands did not copy args: %#v", got)
 	}
 }

@@ -15,6 +15,7 @@ This is an early usable slice focused on day-to-day container work:
 - inspect selected resources
 - scan container CPU and memory directly in the container list
 - run ad-hoc Apple `container` commands without leaving the TUI
+- run named custom Apple `container` commands from config
 - view image variant and layer history
 - tail container, machine, or system logs
 - follow container, machine, or system logs in the terminal
@@ -76,6 +77,7 @@ go build -o bin/lazycont ./cmd/lazycont
 | mouse click | Select a resource tab or row |
 | mouse wheel | Scroll details/log output or move the resource selection |
 | `:` | Run an ad-hoc Apple `container` command, such as `image list --format json` |
+| `;` | Run a named custom Apple `container` command from config |
 | `r` | Refresh lists and status |
 | `u` | Toggle periodic auto-refresh |
 | `a` | Pull an image by reference |
@@ -108,3 +110,24 @@ go build -o bin/lazycont ./cmd/lazycont
 | `q` / `ctrl+c` | Quit |
 
 Destructive actions require a second confirmation key before the command is executed.
+
+## Config
+
+lazycont reads optional custom commands from `~/Library/Application Support/lazycont/config.json` on macOS:
+
+```json
+{
+  "commands": [
+    {
+      "name": "Images as JSON",
+      "args": ["image", "list", "--format", "json"]
+    },
+    {
+      "name": "System disk usage",
+      "args": ["system", "df"]
+    }
+  ]
+}
+```
+
+Press `;` in the TUI and enter a command number, exact name, or unique part of a name. Each entry runs as `container <args>`.

@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	appconfig "github.com/pz/lazycont/internal/config"
 	"github.com/pz/lazycont/internal/containercli"
 	"github.com/pz/lazycont/internal/tui"
 )
@@ -56,10 +57,35 @@ Options:
 
 func runTUI(stderr io.Writer) int {
 	client := containercli.New("container")
-	program := tea.NewProgram(tui.New(client), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	opts := tui.Options{}
+	cfg, path, err := appconfig.LoadDefault()
+	if err != nil {
+		opts.StartupWarning = configWarning(path, err)
+	} else {
+		opts.CustomCommands = customCommands(cfg.Commands)
+	}
+	program := tea.NewProgram(tui.NewWithOptions(client, opts), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(stderr, "lazycont: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+func configWarning(path string, err error) string {
+	if path == "" {
+		return fmt.Sprintf("config: %v", err)
+	}
+	return fmt.Sprintf("config %s: %v", path, err)
+}
+
+func customCommands(commands []appconfig.Command) []tui.CustomCommand {
+	out := make([]tui.CustomCommand, 0, len(commands))
+	for _, command := range commands {
+		out = append(out, tui.CustomCommand{
+			Name: command.Name,
+			Args: append([]string(nil), command.Args...),
+		})
+	}
+	return out
 }

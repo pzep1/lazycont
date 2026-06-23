@@ -7,6 +7,7 @@ import (
 	"math"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -135,6 +136,7 @@ const (
 	promptExportContainer
 	promptExecCommand
 	promptContainerCommand
+	promptCustomCommand
 	promptSaveImage
 	promptLoadImage
 	promptCreateVolume
@@ -147,6 +149,16 @@ type pendingConfirm struct {
 	action confirmAction
 	target string
 	label  string
+}
+
+type Options struct {
+	CustomCommands []CustomCommand
+	StartupWarning string
+}
+
+type CustomCommand struct {
+	Name string
+	Args []string
 }
 
 type Model struct {
@@ -196,6 +208,7 @@ type Model struct {
 
 	autoRefresh     bool
 	refreshInterval time.Duration
+	customCommands  []CustomCommand
 }
 
 type snapshotMsg struct {
@@ -254,13 +267,23 @@ type statHistorySample struct {
 }
 
 func New(client Client) Model {
+	return NewWithOptions(client, Options{})
+}
+
+func NewWithOptions(client Client, opts Options) Model {
+	commands := append([]CustomCommand(nil), opts.CustomCommands...)
+	statusLine := "starting"
+	if strings.TrimSpace(opts.StartupWarning) != "" {
+		statusLine = strings.TrimSpace(opts.StartupWarning)
+	}
 	return Model{
 		client:          client,
 		panelMode:       panelDetails,
 		panelTitle:      "Details",
-		statusLine:      "starting",
+		statusLine:      statusLine,
 		autoRefresh:     true,
 		refreshInterval: defaultRefreshInterval,
+		customCommands:  commands,
 	}
 }
 
@@ -591,6 +614,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case ":":
 		return m.startContainerCommandPrompt(), nil
+	case ";":
+		return m.startCustomCommandPrompt()
 	case "tab":
 		m.active = (m.active + 1) % resourceCount
 		m.resetPanel()
@@ -870,6 +895,18 @@ func (m Model) startContainerCommandPrompt() Model {
 	return m
 }
 
+func (m Model) startCustomCommandPrompt() (tea.Model, tea.Cmd) {
+	if len(m.customCommands) == 0 {
+		m.statusLine = "no custom commands configured"
+		return m, nil
+	}
+	m.prompt = promptCustomCommand
+	m.promptInput = ""
+	m.promptTarget = ""
+	m.statusLine = "custom command"
+	return m, nil
+}
+
 func (m Model) startCreateMachinePrompt() (tea.Model, tea.Cmd) {
 	if m.active != resourceMachines {
 		return m, nil
@@ -1144,6 +1181,28 @@ func (m Model) applyPrompt() (tea.Model, tea.Cmd) {
 		m.busy = "running " + title
 		m.statusLine = "running " + title
 		m.panelMode = panelInspect
+		return m, func() tea.Msg {
+			body, err := m.client.Command(context.Background(), args)
+			if strings.TrimSpace(body) == "" && err == nil {
+				body = "Command completed with no output."
+			}
+			return outputMsg{title: title, body: body, err: err}
+		}
+	case promptCustomCommand:
+		input := m.promptInput
+		m.prompt = promptNone
+		m.promptInput = ""
+		m.promptTarget = ""
+		command, ok := m.customCommandByInput(input)
+		if !ok {
+			m.statusLine = "custom command not found"
+			return m, nil
+		}
+		title := "Custom " + command.Name
+		m.busy = "running " + title
+		m.statusLine = "running " + title
+		m.panelMode = panelInspect
+		args := append([]string(nil), command.Args...)
 		return m, func() tea.Msg {
 			body, err := m.client.Command(context.Background(), args)
 			if strings.TrimSpace(body) == "" && err == nil {
@@ -2483,7 +2542,7 @@ func (m Model) renderFooter() string {
 		return footerStyle.Width(m.width).Foreground(colorActive).Render(truncate(line, m.width-2))
 	}
 	if m.showHelp {
-		help := "tab switch | / filter | : container command | r refresh | u auto-refresh | a pull image | b build image | t tag image | P push image | O save image | L load image | R run image | N create container | g registry login | C create volume/network | M create machine | m machine settings | S default machine | i inspect | c copy files | E export container | l logs | f follow logs | e shell | X exec command | s start | ctrl+r restart | x stop | K kill | d delete/logout | p prune | q quit"
+		help := "tab switch | / filter | : container command | ; custom command | r refresh | u auto-refresh | a pull image | b build image | t tag image | P push image | O save image | L load image | R run image | N create container | g registry login | C create volume/network | M create machine | m machine settings | S default machine | i inspect | c copy files | E export container | l logs | f follow logs | e shell | X exec command | s start | ctrl+r restart | x stop | K kill | d delete/logout | p prune | q quit"
 		return footerStyle.Width(m.width).Render(truncate(help, m.width-2))
 	}
 	status := m.statusLine
@@ -2530,6 +2589,8 @@ func (m Model) promptLine() string {
 		return "exec in " + m.promptTarget + ": " + m.promptInput + "  enter run, esc cancel"
 	case promptContainerCommand:
 		return "container command: " + m.promptInput + "  enter run, e.g. image list --format json, esc cancel"
+	case promptCustomCommand:
+		return "custom command: " + m.promptInput + "  enter run by number/name, " + m.customCommandChoices() + ", esc cancel"
 	case promptSaveImage:
 		return "save " + m.promptTarget + " to tar path: " + m.promptInput + "  enter save, ctrl+u clear, esc cancel"
 	case promptLoadImage:
@@ -2543,6 +2604,47 @@ func (m Model) promptLine() string {
 	default:
 		return ""
 	}
+}
+
+func (m Model) customCommandChoices() string {
+	if len(m.customCommands) == 0 {
+		return "none configured"
+	}
+	choices := make([]string, 0, len(m.customCommands))
+	for idx, command := range m.customCommands {
+		choices = append(choices, fmt.Sprintf("%d=%s", idx+1, command.Name))
+	}
+	return strings.Join(choices, ", ")
+}
+
+func (m Model) customCommandByInput(input string) (CustomCommand, bool) {
+	query := strings.ToLower(strings.TrimSpace(input))
+	if query == "" {
+		return CustomCommand{}, false
+	}
+	if number, err := strconv.Atoi(query); err == nil {
+		index := number - 1
+		if index >= 0 && index < len(m.customCommands) {
+			return m.customCommands[index], true
+		}
+		return CustomCommand{}, false
+	}
+
+	for _, command := range m.customCommands {
+		if strings.ToLower(command.Name) == query {
+			return command, true
+		}
+	}
+
+	var match CustomCommand
+	matches := 0
+	for _, command := range m.customCommands {
+		if strings.Contains(strings.ToLower(command.Name), query) {
+			match = command
+			matches++
+		}
+	}
+	return match, matches == 1
 }
 
 func (m Model) renderSidebar(width int, height int) string {
