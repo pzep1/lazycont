@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -471,6 +472,98 @@ func TestModelLoadsSnapshotIntoView(t *testing.T) {
 	}
 	if !strings.Contains(view, "builder 1") || !strings.Contains(view, "volumes 1") || !strings.Contains(view, "networks 1") || !strings.Contains(view, "machines 1") || !strings.Contains(view, "registries 1") || !strings.Contains(view, "system 1") {
 		t.Fatalf("view did not include secondary resource counts:\n%s", view)
+	}
+}
+
+func TestMouseClickSelectsVisibleContainerRow(t *testing.T) {
+	model := New(&fakeClient{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	updated, _ = updated.Update(snapshotMsg{
+		system: containercli.SystemStatus{Status: "running"},
+		containers: []containercli.Container{
+			testContainer("db", "docker.io/library/postgres:17"),
+			testContainer("api", "docker.io/library/nginx:latest"),
+			testContainer("cache", "docker.io/library/redis:7"),
+		},
+	})
+	state := updated.(Model)
+	layout, ok := state.viewLayout()
+	if !ok {
+		t.Fatalf("expected test layout")
+	}
+
+	updated, cmd := state.Update(tea.MouseMsg{
+		X:      layout.sidebarContentX + 2,
+		Y:      layout.listFirstRowY + 1,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	})
+	if cmd != nil {
+		t.Fatalf("expected no command")
+	}
+	state = updated.(Model)
+	if state.containerCursor != 1 {
+		t.Fatalf("container cursor mismatch: %d", state.containerCursor)
+	}
+	if !strings.Contains(state.View(), "Details api") {
+		t.Fatalf("view did not show clicked container details:\n%s", state.View())
+	}
+}
+
+func TestMouseClickSelectsResourceTab(t *testing.T) {
+	model := New(&fakeClient{})
+	msg := model.refreshCmd()().(snapshotMsg)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	updated, _ = updated.Update(msg)
+	state := updated.(Model)
+	x, y := tabClickPoint(t, state, resourceNetworks)
+
+	updated, cmd := state.Update(tea.MouseMsg{
+		X:      x,
+		Y:      y,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	})
+	if cmd != nil {
+		t.Fatalf("expected no command")
+	}
+	state = updated.(Model)
+	if state.active != resourceNetworks {
+		t.Fatalf("active resource mismatch: %v", state.active)
+	}
+	if !strings.Contains(state.View(), "Details default") {
+		t.Fatalf("view did not show clicked tab details:\n%s", state.View())
+	}
+}
+
+func TestMouseWheelScrollsPanel(t *testing.T) {
+	model := New(&fakeClient{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 16})
+	state := updated.(Model)
+	state.panelMode = panelInspect
+	state.panelTitle = "Long output"
+	lines := make([]string, 40)
+	for idx := range lines {
+		lines[idx] = fmt.Sprintf("line %02d", idx)
+	}
+	state.panelBody = strings.Join(lines, "\n")
+	layout, ok := state.viewLayout()
+	if !ok {
+		t.Fatalf("expected test layout")
+	}
+
+	updated, cmd := state.Update(tea.MouseMsg{
+		X:      layout.panelX + 2,
+		Y:      layout.bodyTop + 2,
+		Button: tea.MouseButtonWheelDown,
+		Action: tea.MouseActionPress,
+	})
+	if cmd != nil {
+		t.Fatalf("expected no command")
+	}
+	state = updated.(Model)
+	if state.panelOffset != 3 {
+		t.Fatalf("panel offset mismatch: %d", state.panelOffset)
 	}
 }
 
@@ -1913,6 +2006,31 @@ func switchTabs(t *testing.T, model tea.Model, count int) tea.Model {
 		}
 	}
 	return updated
+}
+
+func tabClickPoint(t *testing.T, model Model, target resourceKind) (int, int) {
+	t.Helper()
+	layout, ok := model.viewLayout()
+	if !ok {
+		t.Fatalf("expected test layout")
+	}
+	rows := [][]resourceKind{
+		{resourceContainers, resourceImages, resourceBuilder},
+		{resourceVolumes, resourceNetworks, resourceMachines},
+		{resourceRegistries, resourceSystem},
+	}
+	for rowIndex, row := range rows {
+		x := layout.sidebarContentX
+		for _, kind := range row {
+			label := " " + model.tabLabelFor(kind) + " "
+			if kind == target {
+				return x + 1, layout.sidebarContentY + rowIndex
+			}
+			x += len(label) + 1
+		}
+	}
+	t.Fatalf("resource tab not found: %v", target)
+	return 0, 0
 }
 
 func testContainer(id string, image string) containercli.Container {

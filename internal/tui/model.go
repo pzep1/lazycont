@@ -343,10 +343,215 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshCmd()
 	case autoRefreshMsg:
 		return m.handleAutoRefresh()
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 	return m, nil
+}
+
+type viewLayout struct {
+	bodyTop         int
+	bodyHeight      int
+	sidebarWidth    int
+	panelX          int
+	sidebarContentX int
+	sidebarContentY int
+	listFirstRowY   int
+	listDataHeight  int
+}
+
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.confirm != nil || m.prompt != promptNone || m.filtering {
+		return m, nil
+	}
+
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		if m.mouseInPanel(msg) {
+			m.scrollPanel(-3)
+		} else if m.mouseInSidebar(msg) {
+			m.moveSelection(-1)
+		}
+		return m, nil
+	case tea.MouseButtonWheelDown:
+		if m.mouseInPanel(msg) {
+			m.scrollPanel(3)
+		} else if m.mouseInSidebar(msg) {
+			m.moveSelection(1)
+		}
+		return m, nil
+	case tea.MouseButtonLeft:
+		if msg.Action != tea.MouseActionPress {
+			return m, nil
+		}
+		if kind, ok := m.tabAt(msg.X, msg.Y); ok {
+			if m.active != kind {
+				m.active = kind
+				m.clampCursors()
+				m.resetPanel()
+				m.statusLine = "selected " + resourceLabel(kind)
+			}
+			return m, nil
+		}
+		if index, ok := m.listIndexAt(msg.X, msg.Y); ok {
+			if m.setActiveVisibleIndex(index) {
+				m.resetPanel()
+				m.statusLine = "selected " + resourceLabel(m.active)
+			}
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m Model) mouseInSidebar(msg tea.MouseMsg) bool {
+	layout, ok := m.viewLayout()
+	return ok &&
+		msg.X >= 0 && msg.X < layout.sidebarWidth &&
+		msg.Y >= layout.bodyTop && msg.Y < layout.bodyTop+layout.bodyHeight
+}
+
+func (m Model) mouseInPanel(msg tea.MouseMsg) bool {
+	layout, ok := m.viewLayout()
+	return ok &&
+		msg.X >= layout.panelX && msg.X < m.width &&
+		msg.Y >= layout.bodyTop && msg.Y < layout.bodyTop+layout.bodyHeight
+}
+
+func (m Model) tabAt(x int, y int) (resourceKind, bool) {
+	layout, ok := m.viewLayout()
+	if !ok || x < layout.sidebarContentX || y < layout.sidebarContentY || y > layout.sidebarContentY+2 {
+		return resourceContainers, false
+	}
+
+	relX := x - layout.sidebarContentX
+	row := y - layout.sidebarContentY
+	tabRows := [][]resourceKind{
+		{resourceContainers, resourceImages, resourceBuilder},
+		{resourceVolumes, resourceNetworks, resourceMachines},
+		{resourceRegistries, resourceSystem},
+	}
+	if row < 0 || row >= len(tabRows) {
+		return resourceContainers, false
+	}
+
+	cursor := 0
+	for _, kind := range tabRows[row] {
+		label := " " + m.tabLabelFor(kind) + " "
+		if relX >= cursor && relX < cursor+len(label) {
+			return kind, true
+		}
+		cursor += len(label) + 1
+	}
+	return resourceContainers, false
+}
+
+func (m Model) listIndexAt(x int, y int) (int, bool) {
+	layout, ok := m.viewLayout()
+	if !ok || x < layout.sidebarContentX || x >= layout.sidebarWidth-1 || y < layout.listFirstRowY || layout.listDataHeight <= 0 {
+		return 0, false
+	}
+	row := y - layout.listFirstRowY
+	if row < 0 || row >= layout.listDataHeight {
+		return 0, false
+	}
+
+	total := m.activeVisibleCount()
+	if total == 0 {
+		return 0, false
+	}
+	start := visibleStart(m.activeCursor(), layout.listDataHeight, total)
+	index := start + row
+	if index < 0 || index >= total {
+		return 0, false
+	}
+	return index, true
+}
+
+func (m Model) activeCursor() int {
+	switch m.active {
+	case resourceContainers:
+		return m.containerCursor
+	case resourceImages:
+		return m.imageCursor
+	case resourceVolumes:
+		return m.volumeCursor
+	case resourceNetworks:
+		return m.networkCursor
+	case resourceMachines:
+		return m.machineCursor
+	case resourceRegistries:
+		return m.registryCursor
+	default:
+		return 0
+	}
+}
+
+func (m Model) activeVisibleCount() int {
+	switch m.active {
+	case resourceContainers:
+		return len(m.filteredContainerIndexes())
+	case resourceImages:
+		return len(m.filteredImageIndexes())
+	case resourceBuilder:
+		return m.filteredBuilderCount()
+	case resourceVolumes:
+		return len(m.filteredVolumeIndexes())
+	case resourceNetworks:
+		return len(m.filteredNetworkIndexes())
+	case resourceMachines:
+		return len(m.filteredMachineIndexes())
+	case resourceRegistries:
+		return len(m.filteredRegistryIndexes())
+	case resourceSystem:
+		return m.filteredSystemCount()
+	default:
+		return 0
+	}
+}
+
+func (m *Model) setActiveVisibleIndex(index int) bool {
+	switch m.active {
+	case resourceContainers:
+		if index < 0 || index >= len(m.filteredContainerIndexes()) {
+			return false
+		}
+		m.containerCursor = index
+	case resourceImages:
+		if index < 0 || index >= len(m.filteredImageIndexes()) {
+			return false
+		}
+		m.imageCursor = index
+	case resourceBuilder:
+		return index == 0 && m.builderMatchesFilter()
+	case resourceVolumes:
+		if index < 0 || index >= len(m.filteredVolumeIndexes()) {
+			return false
+		}
+		m.volumeCursor = index
+	case resourceNetworks:
+		if index < 0 || index >= len(m.filteredNetworkIndexes()) {
+			return false
+		}
+		m.networkCursor = index
+	case resourceMachines:
+		if index < 0 || index >= len(m.filteredMachineIndexes()) {
+			return false
+		}
+		m.machineCursor = index
+	case resourceRegistries:
+		if index < 0 || index >= len(m.filteredRegistryIndexes()) {
+			return false
+		}
+		m.registryCursor = index
+	case resourceSystem:
+		return index == 0 && m.systemMatchesFilter()
+	default:
+		return false
+	}
+	return true
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -2163,16 +2368,7 @@ func (m Model) View() string {
 		bodyHeight = 1
 	}
 
-	sidebarWidth := m.width / 2
-	if sidebarWidth < 44 {
-		sidebarWidth = 44
-	}
-	if sidebarWidth > 72 {
-		sidebarWidth = 72
-	}
-	if sidebarWidth > m.width-28 {
-		sidebarWidth = m.width - 28
-	}
+	sidebarWidth := sidebarWidthFor(m.width)
 	panelWidth := m.width - sidebarWidth
 
 	sidebar := m.renderSidebar(sidebarWidth, bodyHeight)
@@ -2180,6 +2376,44 @@ func (m Model) View() string {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, panel)
 
 	return lipgloss.JoinVertical(lipgloss.Left, top, body, footer)
+}
+
+func (m Model) viewLayout() (viewLayout, bool) {
+	if m.width < 60 || m.height < 8 {
+		return viewLayout{}, false
+	}
+	bodyHeight := m.height - 2
+	if bodyHeight < 1 {
+		bodyHeight = 1
+	}
+	listHeight := bodyHeight - 6
+	if listHeight < 1 {
+		listHeight = 1
+	}
+	return viewLayout{
+		bodyTop:         1,
+		bodyHeight:      bodyHeight,
+		sidebarWidth:    sidebarWidthFor(m.width),
+		panelX:          sidebarWidthFor(m.width),
+		sidebarContentX: 2,
+		sidebarContentY: 2,
+		listFirstRowY:   7,
+		listDataHeight:  listHeight - 1,
+	}, true
+}
+
+func sidebarWidthFor(width int) int {
+	sidebarWidth := width / 2
+	if sidebarWidth < 44 {
+		sidebarWidth = 44
+	}
+	if sidebarWidth > 72 {
+		sidebarWidth = 72
+	}
+	if sidebarWidth > width-28 {
+		sidebarWidth = width - 28
+	}
+	return sidebarWidth
 }
 
 var (
@@ -2342,14 +2576,14 @@ func (m Model) renderSidebar(width int, height int) string {
 }
 
 func (m Model) renderTabs() string {
-	containers := m.tabLabel("containers", len(m.filteredContainerIndexes()), len(m.containers))
-	images := m.tabLabel("images", len(m.filteredImageIndexes()), len(m.images))
-	builder := m.tabLabel("builder", m.filteredBuilderCount(), 1)
-	volumes := m.tabLabel("volumes", len(m.filteredVolumeIndexes()), len(m.volumes))
-	networks := m.tabLabel("networks", len(m.filteredNetworkIndexes()), len(m.networks))
-	machines := m.tabLabel("machines", len(m.filteredMachineIndexes()), len(m.machines))
-	registries := m.tabLabel("registries", len(m.filteredRegistryIndexes()), len(m.registries))
-	system := m.tabLabel("system", m.filteredSystemCount(), 1)
+	containers := m.tabLabelFor(resourceContainers)
+	images := m.tabLabelFor(resourceImages)
+	builder := m.tabLabelFor(resourceBuilder)
+	volumes := m.tabLabelFor(resourceVolumes)
+	networks := m.tabLabelFor(resourceNetworks)
+	machines := m.tabLabelFor(resourceMachines)
+	registries := m.tabLabelFor(resourceRegistries)
+	system := m.tabLabelFor(resourceSystem)
 	tabs := []string{containers, images, builder, volumes, networks, machines, registries, system}
 	for idx := range tabs {
 		label := " " + tabs[idx] + " "
@@ -2360,6 +2594,52 @@ func (m Model) renderTabs() string {
 		}
 	}
 	return strings.Join(tabs[:3], " ") + "\n" + strings.Join(tabs[3:6], " ") + "\n" + strings.Join(tabs[6:], " ")
+}
+
+func (m Model) tabLabelFor(kind resourceKind) string {
+	switch kind {
+	case resourceContainers:
+		return m.tabLabel("containers", len(m.filteredContainerIndexes()), len(m.containers))
+	case resourceImages:
+		return m.tabLabel("images", len(m.filteredImageIndexes()), len(m.images))
+	case resourceBuilder:
+		return m.tabLabel("builder", m.filteredBuilderCount(), 1)
+	case resourceVolumes:
+		return m.tabLabel("volumes", len(m.filteredVolumeIndexes()), len(m.volumes))
+	case resourceNetworks:
+		return m.tabLabel("networks", len(m.filteredNetworkIndexes()), len(m.networks))
+	case resourceMachines:
+		return m.tabLabel("machines", len(m.filteredMachineIndexes()), len(m.machines))
+	case resourceRegistries:
+		return m.tabLabel("registries", len(m.filteredRegistryIndexes()), len(m.registries))
+	case resourceSystem:
+		return m.tabLabel("system", m.filteredSystemCount(), 1)
+	default:
+		return ""
+	}
+}
+
+func resourceLabel(kind resourceKind) string {
+	switch kind {
+	case resourceContainers:
+		return "containers"
+	case resourceImages:
+		return "images"
+	case resourceBuilder:
+		return "builder"
+	case resourceVolumes:
+		return "volumes"
+	case resourceNetworks:
+		return "networks"
+	case resourceMachines:
+		return "machines"
+	case resourceRegistries:
+		return "registries"
+	case resourceSystem:
+		return "system"
+	default:
+		return "resource"
+	}
 }
 
 func (m Model) tabLabel(name string, filtered int, total int) string {

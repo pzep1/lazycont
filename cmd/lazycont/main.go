@@ -56,7 +56,7 @@ Options:
 
 func runTUI(stderr io.Writer) int {
 	client := containercli.New("container")
-	program := tea.NewProgram(tui.New(client), tea.WithAltScreen())
+	program := tea.NewProgram(tui.New(client), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(stderr, "lazycont: %v\n", err)
 		return 1

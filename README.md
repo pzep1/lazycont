@@ -11,6 +11,7 @@ This is an early usable slice focused on day-to-day container work:
 - browse registry logins
 - browse Apple container system diagnostics
 - filter resource lists across names and metadata
+- click and scroll resource panes with mouse support
 - inspect selected resources
 - scan container CPU and memory directly in the container list
 - run ad-hoc Apple `container` commands without leaving the TUI
@@ -72,6 +73,8 @@ go build -o bin/lazycont ./cmd/lazycont
 | `esc` | Clear the active filter |
 | `up` / `k` | Move selection up |
 | `down` / `j` | Move selection down |
+| mouse click | Select a resource tab or row |
+| mouse wheel | Scroll details/log output or move the resource selection |
 | `:` | Run an ad-hoc Apple `container` command, such as `image list --format json` |
 | `r` | Refresh lists and status |
 | `u` | Toggle periodic auto-refresh |
