@@ -123,6 +123,9 @@ type Model struct {
 	err         error
 	lastUpdated time.Time
 	confirm     *pendingConfirm
+
+	autoRefresh     bool
+	refreshInterval time.Duration
 }
 
 type snapshotMsg struct {
@@ -157,17 +160,23 @@ type followLogsFinishedMsg struct {
 	err error
 }
 
+type autoRefreshMsg time.Time
+
+const defaultRefreshInterval = 5 * time.Second
+
 func New(client Client) Model {
 	return Model{
-		client:     client,
-		panelMode:  panelDetails,
-		panelTitle: "Details",
-		statusLine: "starting",
+		client:          client,
+		panelMode:       panelDetails,
+		panelTitle:      "Details",
+		statusLine:      "starting",
+		autoRefresh:     true,
+		refreshInterval: defaultRefreshInterval,
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.refreshCmd()
+	return tea.Batch(m.refreshCmd(), m.autoRefreshCmd())
 }
 
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -236,6 +245,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.statusLine = "log follow exited " + msg.id
 		return m, m.refreshCmd()
+	case autoRefreshMsg:
+		return m.handleAutoRefresh()
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -285,6 +296,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.busy = "refreshing"
 		m.statusLine = "refreshing"
 		return m, m.refreshCmd()
+	case "u":
+		m.autoRefresh = !m.autoRefresh
+		if m.autoRefresh {
+			m.statusLine = "auto-refresh on"
+			return m, m.autoRefreshCmd()
+		}
+		m.statusLine = "auto-refresh off"
+		return m, nil
 	case "up", "k":
 		m.moveSelection(-1)
 		return m, nil
@@ -553,6 +572,32 @@ func (m Model) refreshCmd() tea.Cmd {
 		msg.err = joinErrors(errs)
 		return msg
 	}
+}
+
+func (m Model) autoRefreshCmd() tea.Cmd {
+	if !m.autoRefresh {
+		return nil
+	}
+	interval := m.refreshInterval
+	if interval <= 0 {
+		interval = defaultRefreshInterval
+	}
+	return tea.Tick(interval, func(t time.Time) tea.Msg {
+		return autoRefreshMsg(t)
+	})
+}
+
+func (m Model) handleAutoRefresh() (tea.Model, tea.Cmd) {
+	nextTick := m.autoRefreshCmd()
+	if !m.autoRefresh {
+		return m, nil
+	}
+	if m.busy != "" || m.confirm != nil || m.prompt != promptNone || m.filtering {
+		return m, nextTick
+	}
+	m.busy = "refreshing"
+	m.statusLine = "auto refreshing"
+	return m, tea.Batch(m.refreshCmd(), nextTick)
 }
 
 func (m Model) inspectSelected() (tea.Model, tea.Cmd) {
@@ -944,7 +989,7 @@ func (m Model) renderFooter() string {
 		return footerStyle.Width(m.width).Foreground(colorActive).Render(truncate(line, m.width-2))
 	}
 	if m.showHelp {
-		help := "tab switch | / filter | a pull image | R run image | r refresh | i inspect | l logs | f follow logs | e shell | s start | x stop | K kill | d delete | p prune | q quit"
+		help := "tab switch | / filter | r refresh | u auto-refresh | a pull image | R run image | i inspect | l logs | f follow logs | e shell | s start | x stop | K kill | d delete | p prune | q quit"
 		return footerStyle.Width(m.width).Render(truncate(help, m.width-2))
 	}
 	status := m.statusLine
@@ -957,7 +1002,14 @@ func (m Model) renderFooter() string {
 	if m.err != nil {
 		return footerStyle.Width(m.width).Foreground(colorRed).Render(truncate(status, m.width-2))
 	}
-	return footerStyle.Width(m.width).Render(truncate(status+" | f follow | ? help", m.width-2))
+	return footerStyle.Width(m.width).Render(truncate(status+" | "+m.autoRefreshLabel()+" | f follow | ? help", m.width-2))
+}
+
+func (m Model) autoRefreshLabel() string {
+	if m.autoRefresh {
+		return "u auto:on"
+	}
+	return "u auto:off"
 }
 
 func (m Model) promptLine() string {

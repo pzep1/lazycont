@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -167,7 +168,7 @@ func (f *fakeClient) PruneNetworks(context.Context) error {
 
 func TestModelLoadsSnapshotIntoView(t *testing.T) {
 	model := New(&fakeClient{})
-	msg := model.Init()().(snapshotMsg)
+	msg := model.refreshCmd()().(snapshotMsg)
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	updated, _ = updated.Update(msg)
 	view := updated.View()
@@ -189,7 +190,7 @@ func TestModelLoadsSnapshotIntoView(t *testing.T) {
 func TestDeleteRequiresConfirmation(t *testing.T) {
 	client := &fakeClient{}
 	model := New(client)
-	msg := model.Init()().(snapshotMsg)
+	msg := model.refreshCmd()().(snapshotMsg)
 	updated, _ := model.Update(msg)
 	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 	if client.deleted != "" {
@@ -278,7 +279,7 @@ func TestEscapeClearsFilter(t *testing.T) {
 
 func TestShellRequiresRunningContainer(t *testing.T) {
 	model := New(&fakeClient{})
-	msg := model.Init()().(snapshotMsg)
+	msg := model.refreshCmd()().(snapshotMsg)
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	updated, _ = updated.Update(msg)
 	updated, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
@@ -288,6 +289,76 @@ func TestShellRequiresRunningContainer(t *testing.T) {
 	view := updated.View()
 	if !strings.Contains(view, "start db before opening a shell") {
 		t.Fatalf("view did not explain shell guard:\n%s", view)
+	}
+}
+
+func TestInitStartsRefreshAndAutoRefreshTimer(t *testing.T) {
+	model := New(&fakeClient{})
+	cmd := model.Init()
+	if cmd == nil {
+		t.Fatalf("expected init command")
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected batch init message, got %T", msg)
+	}
+	if len(batch) != 2 {
+		t.Fatalf("expected refresh and auto-refresh commands, got %d", len(batch))
+	}
+}
+
+func TestAutoRefreshTickRefreshesWhenIdleAndReschedules(t *testing.T) {
+	model := New(&fakeClient{})
+	model.refreshInterval = time.Millisecond
+	updated, cmd := model.Update(autoRefreshMsg(time.Now()))
+	if cmd == nil {
+		t.Fatalf("expected auto-refresh batch command")
+	}
+	if updated.(Model).busy != "refreshing" {
+		t.Fatalf("expected refreshing busy state, got %q", updated.(Model).busy)
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected refresh and next tick batch, got %T", msg)
+	}
+	if len(batch) != 2 {
+		t.Fatalf("expected refresh and next tick commands, got %d", len(batch))
+	}
+}
+
+func TestAutoRefreshTickSkipsDuringPrompt(t *testing.T) {
+	model := New(&fakeClient{})
+	model.prompt = promptPullImage
+	model.refreshInterval = time.Millisecond
+	updated, cmd := model.Update(autoRefreshMsg(time.Now()))
+	if cmd == nil {
+		t.Fatalf("expected next tick command")
+	}
+	if updated.(Model).busy != "" {
+		t.Fatalf("expected no refresh while prompting, got busy %q", updated.(Model).busy)
+	}
+	if _, ok := cmd().(autoRefreshMsg); !ok {
+		t.Fatalf("expected a rescheduled auto-refresh tick")
+	}
+}
+
+func TestAutoRefreshToggle(t *testing.T) {
+	model := New(&fakeClient{})
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	if cmd != nil {
+		t.Fatalf("expected no command when disabling auto-refresh")
+	}
+	if updated.(Model).autoRefresh {
+		t.Fatalf("expected auto-refresh disabled")
+	}
+	updated, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	if cmd == nil {
+		t.Fatalf("expected tick command when enabling auto-refresh")
+	}
+	if !updated.(Model).autoRefresh {
+		t.Fatalf("expected auto-refresh enabled")
 	}
 }
 

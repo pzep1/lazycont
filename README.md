@@ -13,7 +13,7 @@ This is an early usable slice focused on day-to-day container work:
 - pull images and run selected images as detached containers
 - start, stop, kill, and delete containers
 - delete or prune images
-- refresh Apple container system status, lists, and one-shot stats
+- auto-refresh Apple container system status, lists, and one-shot stats
 
 ## Requirements
 
@@ -42,6 +42,7 @@ go build -o bin/lazycont ./cmd/lazycont
 | `up` / `k` | Move selection up |
 | `down` / `j` | Move selection down |
 | `r` | Refresh lists and status |
+| `u` | Toggle periodic auto-refresh |
 | `a` | Pull an image by reference |
 | `R` | Run the selected image detached, with an optional name |
 | `i` / `enter` | Inspect selected resource |
