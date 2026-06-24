@@ -50,7 +50,7 @@ Once a first release is tagged, add a stable source archive to the formula:
 
 ```ruby
 url "https://github.com/pzep1/lazycontainer/archive/refs/tags/v0.3.0.tar.gz"
-sha256 "90e5a7d99334e94bab1e1730ada6e10ac66505055d2d9eb6c8ea6ca898b90a91"
+sha256 "cc1cd7b40c45dd1a27f07762693cc356e354b58156b8bbe39c45fa685ed846d6"
 ```
 
 Then rerun:
