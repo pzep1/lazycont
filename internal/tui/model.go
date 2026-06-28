@@ -546,6 +546,9 @@ type viewLayout struct {
 	sidebarContentY int
 	listFirstRowY   int
 	listDataHeight  int
+	// sidebar holds the rendered stacked-panel geometry so mouse hit-testing
+	// shares one source of truth with the renderer.
+	sidebar sidebarRender
 }
 
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -616,41 +619,33 @@ func (m Model) mouseInPanel(msg tea.MouseMsg) bool {
 		msg.Y >= layout.bodyTop && msg.Y < layout.bodyTop+layout.bodyHeight
 }
 
+// tabAt maps a click to the resource section whose header sits on that row.
+// Each stacked panel header is one row, so a click anywhere along it focuses
+// that section.
 func (m Model) tabAt(x int, y int) (resourceKind, bool) {
 	layout, ok := m.viewLayout()
-	if !ok || layout.sidebarWidth <= 0 || x >= layout.sidebarWidth || x < layout.sidebarContentX || y < layout.sidebarContentY || y > layout.sidebarContentY+2 {
+	if !ok || layout.sidebarWidth <= 0 || x < layout.sidebarContentX || x >= layout.sidebarWidth-1 {
 		return resourceContainers, false
 	}
-
-	relX := x - layout.sidebarContentX
 	row := y - layout.sidebarContentY
-	tabRows := [][]resourceKind{
-		{resourceContainers, resourceImages, resourceBuilder},
-		{resourceVolumes, resourceNetworks, resourceMachines},
-		{resourceRegistries, resourceSystem},
-	}
-	if row < 0 || row >= len(tabRows) {
+	if row < 0 {
 		return resourceContainers, false
 	}
-
-	cursor := 0
-	for _, kind := range tabRows[row] {
-		label := " " + m.tabLabelFor(kind) + " "
-		if relX >= cursor && relX < cursor+len(label) {
+	for kind, headerRow := range layout.sidebar.headerRow {
+		if row == headerRow {
 			return kind, true
 		}
-		cursor += len(label) + 1
 	}
 	return resourceContainers, false
 }
 
 func (m Model) listIndexAt(x int, y int) (int, bool) {
 	layout, ok := m.viewLayout()
-	if !ok || x < layout.sidebarContentX || x >= layout.sidebarWidth-1 || y < layout.listFirstRowY || layout.listDataHeight <= 0 {
+	if !ok || x < layout.sidebarContentX || x >= layout.sidebarWidth-1 {
 		return 0, false
 	}
 	row := y - layout.listFirstRowY
-	if row < 0 || row >= layout.listDataHeight {
+	if row < 0 || row >= layout.sidebar.listRows {
 		return 0, false
 	}
 
@@ -2615,19 +2610,21 @@ func (m Model) viewLayout() (viewLayout, bool) {
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
-	listHeight := bodyHeight - 6
-	if listHeight < 1 {
-		listHeight = 1
-	}
+	sidebarWidth := m.sidebarWidth()
+	// Header rows live inside the sidebar box: one border row + one (zero)
+	// padding row sit above the first content line, so content starts at Y=2.
+	const contentY = 2
+	sidebar := m.buildSidebar(sidebarWidth, bodyHeight-2)
 	return viewLayout{
 		bodyTop:         1,
 		bodyHeight:      bodyHeight,
-		sidebarWidth:    m.sidebarWidth(),
-		panelX:          m.sidebarWidth(),
+		sidebarWidth:    sidebarWidth,
+		panelX:          sidebarWidth,
 		sidebarContentX: 2,
-		sidebarContentY: 2,
-		listFirstRowY:   7,
-		listDataHeight:  listHeight - 1,
+		sidebarContentY: contentY,
+		listFirstRowY:   contentY + sidebar.listFirstRow,
+		listDataHeight:  sidebar.listDataHeight,
+		sidebar:         sidebar,
 	}, true
 }
 
@@ -2691,6 +2688,9 @@ func applyTheme(border string, activeColor string, selectedBg string) {
 		colorActive = lipgloss.Color(activeColor)
 		activePanelStyle = activePanelStyle.BorderForeground(colorActive)
 		tabActiveStyle = tabActiveStyle.Foreground(colorActive)
+		sidebarBarStyle = sidebarBarStyle.Foreground(colorActive)
+		sidebarActiveStyle = sidebarActiveStyle.Foreground(colorActive)
+		keyHintStyle = keyHintStyle.Foreground(colorActive)
 	}
 	if strings.TrimSpace(selectedBg) != "" {
 		selectedStyle = selectedStyle.Background(lipgloss.Color(selectedBg))
@@ -2712,25 +2712,23 @@ func borderForName(name string) (lipgloss.Border, bool) {
 }
 
 var (
-	colorText       = lipgloss.Color("252")
-	colorMuted      = lipgloss.Color("244")
-	colorPanel      = lipgloss.Color("238")
-	colorActive     = lipgloss.Color("39")
-	colorGreen      = lipgloss.Color("42")
-	colorRed        = lipgloss.Color("203")
-	colorYellow     = lipgloss.Color("214")
-	colorBackground = lipgloss.Color("235")
+	colorText   = lipgloss.Color("252")
+	colorMuted  = lipgloss.Color("244")
+	colorPanel  = lipgloss.Color("238")
+	colorActive = lipgloss.Color("39")
+	colorGreen  = lipgloss.Color("42")
+	colorRed    = lipgloss.Color("203")
+	colorYellow = lipgloss.Color("214")
 
 	topStyle = lipgloss.NewStyle().
 			Foreground(colorText).
-			Background(colorBackground).
+			Bold(true).
 			Padding(0, 1)
 	footerStyle = lipgloss.NewStyle().
 			Foreground(colorMuted).
-			Background(colorBackground).
 			Padding(0, 1)
 	panelStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
+			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colorPanel).
 			Padding(0, 1)
 	activePanelStyle = panelStyle.Copy().
@@ -2739,33 +2737,65 @@ var (
 			Foreground(lipgloss.Color("230")).
 			Background(lipgloss.Color("57")).
 			Bold(true)
-	mutedStyle     = lipgloss.NewStyle().Foreground(colorMuted)
-	errorStyle     = lipgloss.NewStyle().Foreground(colorRed)
-	runningStyle   = lipgloss.NewStyle().Foreground(colorGreen)
-	stoppedStyle   = lipgloss.NewStyle().Foreground(colorYellow)
+	mutedStyle = lipgloss.NewStyle().Foreground(colorMuted)
+	errorStyle = lipgloss.NewStyle().Foreground(colorRed)
+
+	runningStyle = lipgloss.NewStyle().Foreground(colorGreen)
+	stoppedStyle = lipgloss.NewStyle().Foreground(colorYellow)
+
 	tabActiveStyle = lipgloss.NewStyle().Foreground(colorActive).Bold(true).Underline(true)
+
+	// Sidebar section headers (lazydocker-style stacked panels). The focused
+	// section gets an accent bar and a bold accent title; the rest are muted.
+	sidebarBarStyle    = lipgloss.NewStyle().Foreground(colorActive).Bold(true)
+	sidebarActiveStyle = lipgloss.NewStyle().Foreground(colorActive).Bold(true)
+	sidebarHeaderStyle = lipgloss.NewStyle().Foreground(colorText).Bold(true)
+	keyHintStyle       = lipgloss.NewStyle().Foreground(colorActive).Bold(true)
+	topNameStyle       = lipgloss.NewStyle().Foreground(colorActive).Bold(true)
 )
+
+// statusDot returns a colored ● reflecting a resource/service state.
+func statusDot(state string) string {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "running", "ready", "active":
+		return runningStyle.Render("●")
+	case "stopped", "exited", "not running", "inactive", "down":
+		return errorStyle.Render("●")
+	case "", "unknown":
+		return mutedStyle.Render("●")
+	default:
+		return stoppedStyle.Render("●")
+	}
+}
 
 func (m Model) renderTopBar() string {
 	status := m.system.Status
 	if status == "" {
 		status = "unknown"
 	}
-	left := fmt.Sprintf("%s | apple container: %s", appmeta.Name, status)
+	left := topNameStyle.Render(appmeta.Name) + "  " + statusDot(status) + " " + mutedStyle.Render(status)
+	leftWidth := len(appmeta.Name) + 2 + 1 + 1 + len(status)
 	if m.busy != "" {
-		left += " | " + m.busy
+		left += mutedStyle.Render("  ·  ") + stoppedStyle.Render(m.busy)
+		leftWidth += 5 + len(m.busy)
 	}
-	right := ""
+	right, rightWidth := "", 0
 	if !m.lastUpdated.IsZero() {
-		right = "updated " + m.lastUpdated.Format("15:04:05")
+		text := "updated " + m.lastUpdated.Format("15:04:05")
+		right, rightWidth = mutedStyle.Render(text), len(text)
 	}
-	line := fitColumns(left, right, m.width-2)
-	return topStyle.Width(m.width).Render(line)
+	inner := m.width - 2
+	gap := inner - leftWidth - rightWidth
+	if gap < 1 {
+		gap, right = 1, ""
+	}
+	return topStyle.Width(m.width).Render(left + strings.Repeat(" ", gap) + right)
 }
 
 func (m Model) renderFooter() string {
 	if m.confirm != nil {
-		return topStyle.Width(m.width).Foreground(colorYellow).Render(m.confirm.label + "  y/enter confirm, n/esc cancel")
+		line := stoppedStyle.Render(m.confirm.label) + mutedStyle.Render("  ") + keyHints([][2]string{{"y/enter", "confirm"}, {"n/esc", "cancel"}})
+		return footerStyle.Width(m.width).Render(truncate(line, m.width-2))
 	}
 	if m.prompt != promptNone {
 		return footerStyle.Width(m.width).Foreground(colorActive).Render(truncate(m.promptLine(), m.width-2))
@@ -2775,20 +2805,86 @@ func (m Model) renderFooter() string {
 		if value == "" {
 			value = " "
 		}
-		line := "/ " + value + "  enter apply, esc cancel, ctrl+u clear"
-		return footerStyle.Width(m.width).Foreground(colorActive).Render(truncate(line, m.width-2))
+		line := keyHintStyle.Render("/") + " " + value + "  " + keyHints([][2]string{{"enter", "apply"}, {"esc", "cancel"}, {"ctrl+u", "clear"}})
+		return footerStyle.Width(m.width).Render(truncate(line, m.width-2))
 	}
+
 	status := m.statusLine
 	if status == "" {
-		status = "space actions · ? help"
+		status = "ready"
 	}
 	if activeFilter(m.filter) != "" {
-		status = status + " | filter: " + m.filter
+		status = status + " · filter: " + m.filter
 	}
+	status = status + " · " + m.autoRefreshLabel()
+
+	inner := m.width - 2
+	statusText := truncate(status, inner)
+	statusStyled := mutedStyle.Render(statusText)
 	if m.err != nil {
-		return footerStyle.Width(m.width).Foreground(colorRed).Render(truncate(status, m.width-2))
+		statusStyled = errorStyle.Render(statusText)
 	}
-	return footerStyle.Width(m.width).Render(truncate(status+" | "+m.autoRefreshLabel()+" | space menu | ? help", m.width-2))
+	// The status message takes priority; hints fill whatever space is left,
+	// dropping the lowest-priority (trailing) ones when the line is tight.
+	hints, hintsWidth := fitKeyHints(m.footerKeyHints(), inner-len(statusText)-3)
+	gap := inner - len(statusText) - hintsWidth
+	if gap < 1 {
+		gap = 1
+	}
+	return footerStyle.Width(m.width).Render(statusStyled + strings.Repeat(" ", gap) + hints)
+}
+
+// footerKeyHints returns the key/label pairs shown at the bottom-right. The
+// always-available globals come first so they survive when space is tight; the
+// focused resource's primary actions follow.
+func (m Model) footerKeyHints() [][2]string {
+	pairs := [][2]string{{"space", "menu"}, {"?", "help"}, {"q", "quit"}}
+	switch m.active {
+	case resourceContainers:
+		pairs = append(pairs, [2]string{"s", "start"}, [2]string{"x", "stop"}, [2]string{"l", "logs"}, [2]string{"e", "shell"})
+	case resourceImages:
+		pairs = append(pairs, [2]string{"a", "pull"}, [2]string{"R", "run"}, [2]string{"b", "build"})
+	case resourceVolumes, resourceNetworks:
+		pairs = append(pairs, [2]string{"C", "create"}, [2]string{"d", "delete"})
+	case resourceMachines:
+		pairs = append(pairs, [2]string{"M", "new"}, [2]string{"e", "shell"}, [2]string{"S", "default"})
+	case resourceRegistries:
+		pairs = append(pairs, [2]string{"g", "login"}, [2]string{"d", "logout"})
+	case resourceBuilder, resourceSystem:
+		pairs = append(pairs, [2]string{"s", "start"}, [2]string{"x", "stop"})
+	}
+	return pairs
+}
+
+// keyHints renders "key label · key label …" with accented keys and muted
+// labels.
+func keyHints(pairs [][2]string) string {
+	segments := make([]string, 0, len(pairs))
+	for _, p := range pairs {
+		segments = append(segments, keyHintStyle.Render(p[0])+" "+mutedStyle.Render(p[1]))
+	}
+	return strings.Join(segments, mutedStyle.Render(" · "))
+}
+
+// fitKeyHints renders as many leading pairs as fit in maxWidth and returns the
+// rendered string with its visible width.
+func fitKeyHints(pairs [][2]string, maxWidth int) (string, int) {
+	if maxWidth <= 0 {
+		return "", 0
+	}
+	width, kept := 0, 0
+	for i, p := range pairs {
+		add := len(p[0]) + 1 + len(p[1])
+		if i > 0 {
+			add += 3 // " · "
+		}
+		if width+add > maxWidth {
+			break
+		}
+		width += add
+		kept++
+	}
+	return keyHints(pairs[:kept]), width
 }
 
 func (m Model) autoRefreshLabel() string {
@@ -2990,78 +3086,179 @@ func customCommandPlaceholders() []struct {
 	}
 }
 
-func (m Model) renderSidebar(width int, height int) string {
-	style := activePanelStyle.Width(width - 2).Height(height - 2)
-	var lines []string
-	lines = append(lines, strings.Split(m.renderTabs(), "\n")...)
-	lines = append(lines, "")
-	listHeight := height - len(lines) - 2
-	if listHeight < 1 {
-		listHeight = 1
-	}
-	switch m.active {
-	case resourceContainers:
-		lines = append(lines, m.renderContainerList(width-4, listHeight)...)
-	case resourceImages:
-		lines = append(lines, m.renderImageList(width-4, listHeight)...)
-	case resourceBuilder:
-		lines = append(lines, m.renderBuilderList(width-4, listHeight)...)
-	case resourceVolumes:
-		lines = append(lines, m.renderVolumeList(width-4, listHeight)...)
-	case resourceNetworks:
-		lines = append(lines, m.renderNetworkList(width-4, listHeight)...)
-	case resourceMachines:
-		lines = append(lines, m.renderMachineList(width-4, listHeight)...)
-	case resourceRegistries:
-		lines = append(lines, m.renderRegistryList(width-4, listHeight)...)
-	case resourceSystem:
-		lines = append(lines, m.renderSystemList(width-4, listHeight)...)
-	}
-	return style.Render(strings.Join(lines, "\n"))
+// sidebarRender holds a built stacked-panel sidebar: the rendered content lines
+// plus the geometry mouse hit-testing needs. Both renderSidebar and viewLayout
+// build it so the visuals and click targets never drift apart.
+type sidebarRender struct {
+	lines          []string             // content lines (inside the box border/padding)
+	headerRow      map[resourceKind]int // content-relative row of each section header
+	listFirstRow   int                  // content-relative row of the focused list's first item
+	listRows       int                  // item rows actually shown for the focused section
+	listDataHeight int                  // paging capacity used to window the focused list
 }
 
-func (m Model) renderTabs() string {
-	containers := m.tabLabelFor(resourceContainers)
-	images := m.tabLabelFor(resourceImages)
-	builder := m.tabLabelFor(resourceBuilder)
-	volumes := m.tabLabelFor(resourceVolumes)
-	networks := m.tabLabelFor(resourceNetworks)
-	machines := m.tabLabelFor(resourceMachines)
-	registries := m.tabLabelFor(resourceRegistries)
-	system := m.tabLabelFor(resourceSystem)
-	tabs := []string{containers, images, builder, volumes, networks, machines, registries, system}
-	for idx := range tabs {
-		label := " " + tabs[idx] + " "
-		if resourceKind(idx) == m.active {
-			tabs[idx] = selectedStyle.Render(label)
-		} else {
-			tabs[idx] = mutedStyle.Render(label)
+func sidebarOrder() []resourceKind {
+	return []resourceKind{
+		resourceContainers, resourceImages, resourceBuilder, resourceVolumes,
+		resourceNetworks, resourceMachines, resourceRegistries, resourceSystem,
+	}
+}
+
+// buildSidebar lays out the lazydocker-style stacked sidebar: every resource is
+// a titled section header, and the focused section expands to show its list.
+// contentHeight is the room inside the sidebar box (border + padding excluded).
+func (m Model) buildSidebar(width int, contentHeight int) sidebarRender {
+	order := sidebarOrder()
+	innerWidth := width - 4 // box border (2 cols) + horizontal padding (2 cols)
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	// Every section costs one header row; the focused section gets the rest.
+	listRegion := contentHeight - len(order)
+	if listRegion < 0 {
+		listRegion = 0
+	}
+	out := sidebarRender{
+		headerRow:      make(map[resourceKind]int, len(order)),
+		listFirstRow:   -1,
+		listDataHeight: listRegion - 1,
+	}
+	if out.listDataHeight < 0 {
+		out.listDataHeight = 0
+	}
+	for _, kind := range order {
+		out.headerRow[kind] = len(out.lines)
+		out.lines = append(out.lines, m.renderSidebarHeader(kind, innerWidth))
+		if kind != m.active || listRegion < 1 {
+			continue
+		}
+		items := m.renderActiveList(kind, innerWidth, listRegion)
+		for idx, row := range items {
+			if idx == 1 {
+				out.listFirstRow = len(out.lines)
+			}
+			out.lines = append(out.lines, row)
+		}
+		if len(items) > 1 {
+			out.listRows = len(items) - 1
+		}
+		if out.listFirstRow == -1 {
+			out.listFirstRow = len(out.lines)
 		}
 	}
-	return strings.Join(tabs[:3], " ") + "\n" + strings.Join(tabs[3:6], " ") + "\n" + strings.Join(tabs[6:], " ")
+	if out.listFirstRow == -1 {
+		out.listFirstRow = len(out.lines)
+	}
+	// Never overflow the box height (extreme small terminals).
+	if len(out.lines) > contentHeight {
+		out.lines = out.lines[:contentHeight]
+	}
+	return out
 }
 
-func (m Model) tabLabelFor(kind resourceKind) string {
+func (m Model) renderSidebar(width int, height int) string {
+	style := activePanelStyle.Width(width - 2).Height(height - 2)
+	sb := m.buildSidebar(width, height-2)
+	return style.Render(strings.Join(sb.lines, "\n"))
+}
+
+// renderActiveList renders the item list for the focused section.
+func (m Model) renderActiveList(kind resourceKind, width int, height int) []string {
 	switch kind {
 	case resourceContainers:
-		return m.tabLabel("containers", len(m.filteredContainerIndexes()), len(m.containers))
+		return m.renderContainerList(width, height)
 	case resourceImages:
-		return m.tabLabel("images", len(m.filteredImageIndexes()), len(m.images))
+		return m.renderImageList(width, height)
 	case resourceBuilder:
-		return m.tabLabel("builder", m.filteredBuilderCount(), 1)
+		return m.renderBuilderList(width, height)
 	case resourceVolumes:
-		return m.tabLabel("volumes", len(m.filteredVolumeIndexes()), len(m.volumes))
+		return m.renderVolumeList(width, height)
 	case resourceNetworks:
-		return m.tabLabel("networks", len(m.filteredNetworkIndexes()), len(m.networks))
+		return m.renderNetworkList(width, height)
 	case resourceMachines:
-		return m.tabLabel("machines", len(m.filteredMachineIndexes()), len(m.machines))
+		return m.renderMachineList(width, height)
 	case resourceRegistries:
-		return m.tabLabel("registries", len(m.filteredRegistryIndexes()), len(m.registries))
+		return m.renderRegistryList(width, height)
 	case resourceSystem:
-		return m.tabLabel("system", m.filteredSystemCount(), 1)
+		return m.renderSystemList(width, height)
+	}
+	return nil
+}
+
+// renderSidebarHeader draws one stacked-panel title bar. The focused section
+// gets an accent bar + bold accent title; the rest stay muted.
+func (m Model) renderSidebarHeader(kind resourceKind, width int) string {
+	if width < 4 {
+		return truncate(sidebarTitle(kind), width)
+	}
+	title := sidebarTitle(kind)
+	if count := m.sidebarCountLabel(kind); count != "" {
+		title += " (" + count + ")"
+	}
+	body := truncate(title, width-2)
+	if kind == m.active {
+		return sidebarBarStyle.Render("▌ ") + sidebarActiveStyle.Render(body)
+	}
+	return "  " + sidebarHeaderStyle.Render(body)
+}
+
+func sidebarTitle(kind resourceKind) string {
+	switch kind {
+	case resourceContainers:
+		return "Containers"
+	case resourceImages:
+		return "Images"
+	case resourceBuilder:
+		return "Builder"
+	case resourceVolumes:
+		return "Volumes"
+	case resourceNetworks:
+		return "Networks"
+	case resourceMachines:
+		return "Machines"
+	case resourceRegistries:
+		return "Registries"
+	case resourceSystem:
+		return "System"
+	default:
+		return "Resource"
+	}
+}
+
+// sidebarCountLabel is the parenthetical shown beside a section title: a count
+// (filtered/total when a filter hides rows) for list resources, or a state for
+// the singleton builder/system sections.
+func (m Model) sidebarCountLabel(kind resourceKind) string {
+	switch kind {
+	case resourceContainers:
+		return m.countLabel(len(m.filteredContainerIndexes()), len(m.containers))
+	case resourceImages:
+		return m.countLabel(len(m.filteredImageIndexes()), len(m.images))
+	case resourceBuilder:
+		return emptyDash(m.builder.State())
+	case resourceVolumes:
+		return m.countLabel(len(m.filteredVolumeIndexes()), len(m.volumes))
+	case resourceNetworks:
+		return m.countLabel(len(m.filteredNetworkIndexes()), len(m.networks))
+	case resourceMachines:
+		return m.countLabel(len(m.filteredMachineIndexes()), len(m.machines))
+	case resourceRegistries:
+		return m.countLabel(len(m.filteredRegistryIndexes()), len(m.registries))
+	case resourceSystem:
+		return emptyDash(m.system.Status)
 	default:
 		return ""
 	}
+}
+
+func (m Model) countLabel(filtered int, total int) string {
+	if activeFilter(m.filter) == "" || filtered == total {
+		return strconv.Itoa(total)
+	}
+	return fmt.Sprintf("%d/%d", filtered, total)
 }
 
 func resourceLabel(kind resourceKind) string {
@@ -3085,13 +3282,6 @@ func resourceLabel(kind resourceKind) string {
 	default:
 		return "resource"
 	}
-}
-
-func (m Model) tabLabel(name string, filtered int, total int) string {
-	if activeFilter(m.filter) == "" || filtered == total {
-		return fmt.Sprintf("%s %d", name, total)
-	}
-	return fmt.Sprintf("%s %d/%d", name, filtered, total)
 }
 
 func (m Model) renderContainerList(width int, height int) []string {
