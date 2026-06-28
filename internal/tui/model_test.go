@@ -474,16 +474,16 @@ func TestModelLoadsSnapshotIntoView(t *testing.T) {
 	updated, _ = updated.Update(msg)
 	view := updated.View()
 
-	if !strings.Contains(view, "apple container: running") {
+	if !strings.Contains(view, "● running") {
 		t.Fatalf("view did not include system status:\n%s", view)
 	}
 	if !strings.Contains(view, "db") {
 		t.Fatalf("view did not include container:\n%s", view)
 	}
-	if !strings.Contains(view, "containers 1") {
+	if !strings.Contains(view, "Containers (1)") {
 		t.Fatalf("view did not include container count:\n%s", view)
 	}
-	if !strings.Contains(view, "builder 1") || !strings.Contains(view, "volumes 1") || !strings.Contains(view, "networks 1") || !strings.Contains(view, "machines 1") || !strings.Contains(view, "registries 1") || !strings.Contains(view, "system 1") {
+	if !strings.Contains(view, "Builder (running)") || !strings.Contains(view, "Volumes (1)") || !strings.Contains(view, "Networks (1)") || !strings.Contains(view, "Machines (1)") || !strings.Contains(view, "Registries (1)") || !strings.Contains(view, "System (running)") {
 		t.Fatalf("view did not include secondary resource counts:\n%s", view)
 	}
 }
@@ -791,7 +791,7 @@ func TestScreenModeCyclesAndFullscreenHidesSidebar(t *testing.T) {
 	if state.sidebarWidth() <= 0 {
 		t.Fatalf("expected a sidebar in normal mode")
 	}
-	if !strings.Contains(state.View(), "volumes") {
+	if !strings.Contains(state.View(), "Volumes") {
 		t.Fatalf("expected sidebar labels in normal mode")
 	}
 
@@ -809,7 +809,7 @@ func TestScreenModeCyclesAndFullscreenHidesSidebar(t *testing.T) {
 	if state.sidebarWidth() != 0 {
 		t.Fatalf("expected hidden sidebar in fullscreen, got width %d", state.sidebarWidth())
 	}
-	if strings.Contains(state.View(), "volumes") {
+	if strings.Contains(state.View(), "Volumes") {
 		t.Fatalf("expected sidebar hidden in fullscreen:\n%s", state.View())
 	}
 
@@ -939,7 +939,7 @@ func TestBuilderPaneShowsStatusAndLifecycleActions(t *testing.T) {
 	updated = switchToBuilder(t, updated)
 
 	view := updated.View()
-	for _, want := range []string{"builder 1", "buildkit", "running", "CPUs:    4", "Memory:  4.0 GB"} {
+	for _, want := range []string{"Builder (running)", "buildkit", "running", "CPUs:    4", "Memory:  4.0 GB"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view did not include %q:\n%s", want, view)
 		}
@@ -995,7 +995,7 @@ func TestSystemPaneShowsDiagnosticsLogsAndLifecycleActions(t *testing.T) {
 	updated = switchToSystem(t, updated)
 
 	view := updated.View()
-	for _, want := range []string{"system 1", "running", "Disk usage", "Containers: 9 total", "Versions", "container: 1.0.0"} {
+	for _, want := range []string{"System (running)", "running", "Disk usage", "Containers: 9 total", "Versions", "container: 1.0.0"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view did not include %q:\n%s", want, view)
 		}
@@ -1112,7 +1112,7 @@ func TestFilterNarrowsContainersAndActionsUseVisibleSelection(t *testing.T) {
 	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	view := updated.View()
-	if !strings.Contains(view, "containers 1/2") {
+	if !strings.Contains(view, "Containers (1/2)") {
 		t.Fatalf("view did not show filtered container count:\n%s", view)
 	}
 	if strings.Contains(view, "api-service") {
@@ -1153,7 +1153,7 @@ func TestEscapeClearsFilter(t *testing.T) {
 	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 
 	view := updated.View()
-	if strings.Contains(view, "containers 1/2") {
+	if strings.Contains(view, "Containers (1/2)") {
 		t.Fatalf("filter count remained after escape:\n%s", view)
 	}
 	if !strings.Contains(view, "api-service") || !strings.Contains(view, "db") {
@@ -1686,7 +1686,7 @@ func TestMachinePaneShowsAndActionsUseSelectedMachine(t *testing.T) {
 	updated = switchToMachines(t, updated)
 
 	view := updated.View()
-	if !strings.Contains(view, "machines 1") {
+	if !strings.Contains(view, "Machines (1)") {
 		t.Fatalf("view did not include machine count:\n%s", view)
 	}
 	if !strings.Contains(view, "dev-machine") || !strings.Contains(view, "running") {
@@ -1753,7 +1753,7 @@ func TestRegistryPaneShowsAndLogoutUsesSelectedRegistry(t *testing.T) {
 	updated = switchToRegistries(t, updated)
 
 	view := updated.View()
-	if !strings.Contains(view, "registries 1") {
+	if !strings.Contains(view, "Registries (1)") {
 		t.Fatalf("view did not include registry count:\n%s", view)
 	}
 	if !strings.Contains(view, "ghcr.io") || !strings.Contains(view, "alice") {
@@ -2468,23 +2468,11 @@ func tabClickPoint(t *testing.T, model Model, target resourceKind) (int, int) {
 	if !ok {
 		t.Fatalf("expected test layout")
 	}
-	rows := [][]resourceKind{
-		{resourceContainers, resourceImages, resourceBuilder},
-		{resourceVolumes, resourceNetworks, resourceMachines},
-		{resourceRegistries, resourceSystem},
+	row, ok := layout.sidebar.headerRow[target]
+	if !ok {
+		t.Fatalf("resource section not found: %v", target)
 	}
-	for rowIndex, row := range rows {
-		x := layout.sidebarContentX
-		for _, kind := range row {
-			label := " " + model.tabLabelFor(kind) + " "
-			if kind == target {
-				return x + 1, layout.sidebarContentY + rowIndex
-			}
-			x += len(label) + 1
-		}
-	}
-	t.Fatalf("resource tab not found: %v", target)
-	return 0, 0
+	return layout.sidebarContentX + 1, layout.sidebarContentY + row
 }
 
 func testContainer(id string, image string) containercli.Container {

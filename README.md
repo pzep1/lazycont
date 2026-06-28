@@ -25,19 +25,27 @@ brew install pzep1/lazycont/lazycontainer
 Requires macOS with Apple's [`container`](https://github.com/apple/container) CLI installed and its system service started. [Other ways to run ↓](#more-ways-to-run)
 
 ```text
-┌ lazycontainer | apple container: running ──────────────────── updated 16:57:03 ┐
-│ ┌─────────────────────────────┐┌──────────────────────────────────────┐  │
-│ │  containers 3   images 6     ││ Logs  Stats  Env  Config  Top  Inspect│  │
-│ │  volumes 2   networks 1  …   ││                                       │  │
-│ │                              ││ 12:07:01 server listening on :8080    │  │
-│ │ name           state/cpu/mem ││ 12:07:04 GET /   200  1ms             │  │
-│ │ web      running  2.1%  45MB ││ 12:07:06 GET /api 200 12ms            │  │
-│ │ db       running  0.4%  60MB ││ ▏following live — End re-attaches     │  │
-│ │ cache    stopped          -  ││                                       │  │
-│ └─────────────────────────────┘└──────────────────────────────────────┘  │
-│ refreshed | u auto:on | space menu | ? help                               │
-└───────────────────────────────────────────────────────────────────────────┘
+ lazycontainer  ● running                                        updated 16:57:03
+╭──────────────────────────────╮╭─────────────────────────────────────────────╮
+│ ▌ Containers (3)             ││ Logs  Stats  Env  Config  Top  Inspect       │
+│ name           state/cpu/mem ││                                              │
+│ web      running  2.1%  45MB ││ 12:07:01 server listening on :8080           │
+│ db       running  0.4%  60MB ││ 12:07:04 GET /   200  1ms                     │
+│ cache    stopped          -  ││ 12:07:06 GET /api 200 12ms                   │
+│   Images (6)                 ││ ▏following live — End re-attaches            │
+│   Builder (running)          ││                                              │
+│   Volumes (2)                ││                                              │
+│   Networks (1)               ││                                              │
+│   Machines (1)               ││                                              │
+│   Registries (1)             ││                                              │
+│   System (running)           ││                                              │
+╰──────────────────────────────╯╰─────────────────────────────────────────────╯
+ refreshed · u auto:on            space menu · ? help · q quit · s start · l logs
 ```
+
+Resources stack as focusable panels down the left, lazydocker-style: the focused
+one expands to show its list (`tab` / `shift+tab` to move between them), while the
+main panel on the right tracks the selected item.
 
 ## Highlights
 
