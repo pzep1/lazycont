@@ -27,37 +27,42 @@ Requires macOS with Apple's [`container`](https://github.com/apple/container) CL
 ```text
  lazycontainer  ● running                                        updated 16:57:03
 ╭──────────────────────────────╮╭─────────────────────────────────────────────╮
-│ ▌ Containers (3)             ││ Logs  Stats  Env  Config  Top  Inspect       │
-│ name           state/cpu/mem ││                                              │
-│ web      running  2.1%  45MB ││ 12:07:01 server listening on :8080           │
-│ db       running  0.4%  60MB ││ 12:07:04 GET /   200  1ms                     │
-│ cache    stopped          -  ││ 12:07:06 GET /api 200 12ms                   │
-│   Services (2)               ││ ▏following live — End re-attaches            │
-│   Images (6)                 ││                                              │
-│   Builder (running)          ││                                              │
-│   Volumes (2)                ││                                              │
-│   Networks (1)               ││                                              │
-│   Machines (1)               ││                                              │
-│   Registries (1)             ││                                              │
-│   System (running)           ││                                              │
+│ ▌ Containers (3)  state/cpu/mem ││ Config Logs Stats Env Ports Mounts Health  │
+│ web       running  2.1%   45MB ││ 12:07:01 server listening on :8080          │
+│ db        running  0.4%   60MB ││ 12:07:04 GET /   200  1ms                    │
+│ cache     stopped         -    ││ 12:07:06 GET /api 200 12ms                  │
+│   Services (2)   state/cpu/mem ││ ▏following live — End re-attaches            │
+│ api       running  0.6%   38MB ││                                             │
+│ worker    stopped         -    ││                                             │
+│   Images (6)       size  used ││                                              │
+│ nginx              1.8.2  142M ││                                             │
+│   Builder (running)     state ││                                              │
+│   Volumes (2)      size  used ││                                              │
+│   Networks (1)     mode  used ││                                              │
+│   Machines (1)          state ││                                              │
+│   System (running)    status ││                                               │
 ╰──────────────────────────────╯╰─────────────────────────────────────────────╯
  refreshed · u auto:on            space menu · ? help · q quit · s start · l logs
 ```
 
-Resources stack as focusable panels down the left, lazydocker-style: the focused
-one expands to show its list (`tab` / `shift+tab` to move between them), while the
-main panel on the right tracks the selected item.
+Every resource stacks as a panel down the left, lazydocker-style, and they are
+**all visible at once** — no accordion. The focused panel gets the accent bar,
+the largest share of vertical space, and the action keys; `tab` / `shift+tab` (or
+`1`–`9`) move focus between panels, while the main panel on the right tracks the
+selected item.
 
 ## Highlights
 
-- ⚡ **Live everything** — stream container, machine, and system logs in-pane with autoscroll, watch **CPU%, memory, network, and disk I/O as live ASCII graphs**, and auto-refresh lists, stats, and status. CPU% is derived from Apple's cumulative counters so you get a real live percentage, not a meaningless running total.
-- 🗂️ **Tabbed main panel** — flip a selected container between **Logs · Stats · Env · Config · Top · Inspect** with `[` / `]`; other resources get the tabs that fit them.
-- ⌨️ **Drive it from the keyboard** — start/stop/restart/kill containers, exec shells, copy & export filesystems, pull/build/tag/push/save/load images, and manage volumes, networks, machines, registries, and the builder. Jump straight to any pane with `1`–`8`.
-- 🧩 **Compose without compose** — Apple's `container` CLI has no `compose`, so lazycontainer brings the **Services** panel anyway: drop a `compose.yaml` beside your project and bring services **up/down**, **start/stop/restart**, and **recreate** them — individually or the whole stack — straight from the TUI. lazycontainer translates each service into the right `container run`/`stop`/`delete` calls, in dependency order.
+- ⚡ **Live everything** — stream container, machine, and system logs in-pane with autoscroll, watch **CPU%, memory, network, and disk I/O as live ASCII graphs**, and auto-refresh lists, stats, and status. CPU% is derived from Apple's cumulative counters so you get a real live percentage.
+- 🗂️ **Tabbed main panel** — flip a selected container between **Config · Logs · Stats · Env · Ports · Mounts · Health · Top · Inspect** with `[` / `]`; other resources get the tabs that fit them.
+- 📊 **Fleet overview strip** — a pinned summary line shows container counts, mean CPU%, memory in use, disk used/reclaimable, and builder state at a glance.
+- 🔗 **In-use badges** — images, volumes, and networks show a **●N** count of how many containers reference them, so you can see what's safe to prune.
+- ⌨️ **Drive it from the keyboard** — start/stop/restart/kill containers, exec shells, copy & export filesystems, pull/build/tag/push/save/load images, and manage volumes, networks, machines, registries, and the builder. Jump straight to any pane with `1`–`9`.
+- 🧩 **Compose without compose** — Apple's `container` CLI has no `compose`, so lazycontainer brings the **Services** panel anyway: drop a `compose.yaml` beside your project and bring services **up/down**, **start/stop/restart**, and **recreate** them — individually or the whole stack — straight from the TUI.
 - 📦 **Bulk actions** — a `B` menu to stop/kill/remove every container or prune images, volumes, and networks in one keystroke (with confirmation).
-- 🍎 **Apple-native extras** — view a container or machine's **VM boot logs** (`ctrl+b`), and see registered **local DNS domains** and **system properties** right in the System pane — things a Docker TUI can't show.
+- 🍎 **Apple-native extras** — view a container or machine's **VM boot logs** (`ctrl+b`), and see registered **local DNS domains** and **system properties** right in the System pane.
 - 🧭 **Discoverable** — a context-aware **actions menu** (`space`), a **bulk actions menu** (`B`), a scrollable **keybinding reference** (`?`), and **screen modes** (`+` / `_`: normal → half → fullscreen).
-- 🎨 **Yours to shape** — custom commands (flat or per-context, with interactive `attach`), an `ignore` list to hide noisy resources, theme/border/layout, log window, and refresh interval — all reloaded live when you edit the config.
+- 🎨 **Yours to shape** — custom commands (flat or per-context, with interactive `attach`), theme/border/layout, log window, and refresh interval — all reloaded live when you edit the config.
 - 🖱️ **Mouse-friendly** — click panes and rows, scroll with the wheel, filter lists with `/`.
 
 <details>
@@ -121,7 +126,8 @@ Press `?` in the app for the same reference, scrollable. Press `space` for a men
 | Key | Action |
 | --- | --- |
 | `tab` / `shift+tab` | Switch resource pane (containers, services, images, builder, volumes, networks, machines, registries, system) |
-| `1`–`9` | Jump straight to a resource pane |
+| `←` / `→` or `h` | Previous / next resource pane |
+| `1`–`9` | Jump to resource pane (1=containers … 9=system) |
 | `[` / `]` | Previous / next main-panel tab |
 | `+` / `_` | Cycle screen mode: normal, half, fullscreen |
 | `space` · `B` | Open the context-aware actions menu · bulk actions menu |

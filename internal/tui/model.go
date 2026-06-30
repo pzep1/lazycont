@@ -114,6 +114,9 @@ const (
 	tabLogs
 	tabStats
 	tabEnv
+	tabPorts
+	tabMounts
+	tabHealth
 	tabTop
 	tabInspect
 )
@@ -602,66 +605,6 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-type viewLayout struct {
-	bodyTop         int
-	bodyHeight      int
-	sidebarWidth    int
-	panelX          int
-	sidebarContentX int
-	sidebarContentY int
-	listFirstRowY   int
-	listDataHeight  int
-	// sidebar holds the rendered stacked-panel geometry so mouse hit-testing
-	// shares one source of truth with the renderer.
-	sidebar sidebarRender
-}
-
-func (m Model) activeCursor() int {
-	switch m.active {
-	case resourceContainers:
-		return m.containerCursor
-	case resourceServices:
-		return m.serviceCursor
-	case resourceImages:
-		return m.imageCursor
-	case resourceVolumes:
-		return m.volumeCursor
-	case resourceNetworks:
-		return m.networkCursor
-	case resourceMachines:
-		return m.machineCursor
-	case resourceRegistries:
-		return m.registryCursor
-	default:
-		return 0
-	}
-}
-
-func (m Model) activeVisibleCount() int {
-	switch m.active {
-	case resourceContainers:
-		return len(m.filteredContainerIndexes())
-	case resourceServices:
-		return len(m.filteredServiceIndexes())
-	case resourceImages:
-		return len(m.filteredImageIndexes())
-	case resourceBuilder:
-		return m.filteredBuilderCount()
-	case resourceVolumes:
-		return len(m.filteredVolumeIndexes())
-	case resourceNetworks:
-		return len(m.filteredNetworkIndexes())
-	case resourceMachines:
-		return len(m.filteredMachineIndexes())
-	case resourceRegistries:
-		return len(m.filteredRegistryIndexes())
-	case resourceSystem:
-		return m.filteredSystemCount()
-	default:
-		return 0
-	}
-}
-
 func (m *Model) setActiveVisibleIndex(index int) bool {
 	switch m.active {
 	case resourceContainers:
@@ -781,18 +724,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startContainerCommandPrompt(), nil
 	case ";":
 		return m.startCustomCommandPrompt()
-	case "tab":
-		m.active = (m.active + 1) % resourceCount
-		m.resetPanel()
+	case "tab", "right":
+		m.goToResource((m.active + 1) % resourceCount)
 		cmd := m.ensureMainPanelCmd()
 		return m, cmd
-	case "shift+tab":
-		m.active = (m.active - 1 + resourceCount) % resourceCount
-		m.resetPanel()
+	case "shift+tab", "left", "h":
+		m.goToResource((m.active - 1 + resourceCount) % resourceCount)
 		cmd := m.ensureMainPanelCmd()
 		return m, cmd
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		return m.jumpToResource(resourceKind(key[0] - '1'))
+		m.goToResource(resourceKind(key[0] - '1'))
+		cmd := m.ensureMainPanelCmd()
+		return m, cmd
 	case "[":
 		cmd := m.cycleTab(-1)
 		return m, cmd
@@ -1214,19 +1157,6 @@ func (m Model) containerBootLogsCmd(id string, lines int) tea.Cmd {
 		}
 		return outputMsg{title: "Boot logs " + id, body: body, err: err}
 	}
-}
-
-// jumpToResource focuses a resource pane directly by index (the 1-9 number
-// keys), mirroring lazydocker's numbered side panels.
-func (m Model) jumpToResource(kind resourceKind) (tea.Model, tea.Cmd) {
-	if kind < 0 || kind >= resourceCount || kind == m.active {
-		return m, nil
-	}
-	m.active = kind
-	m.clampCursors()
-	m.resetPanel()
-	m.statusLine = "selected " + resourceLabel(kind)
-	return m, m.ensureMainPanelCmd()
 }
 
 func (m Model) startFiltering() Model {
@@ -2528,6 +2458,16 @@ func (m Model) confirmCmd(confirm pendingConfirm) tea.Cmd {
 	}
 }
 
+func (m *Model) goToResource(kind resourceKind) {
+	if kind < 0 || kind >= resourceCount {
+		return
+	}
+	m.active = kind
+	m.clampCursors()
+	m.resetPanel()
+	m.statusLine = "selected " + resourceLabel(kind)
+}
+
 func (m *Model) moveSelection(delta int) {
 	switch m.active {
 	case resourceContainers:
@@ -2668,7 +2608,12 @@ func (m Model) View() string {
 
 	top := m.renderTopBar()
 	footer := m.renderFooter()
-	bodyHeight := m.height - lipgloss.Height(top) - lipgloss.Height(footer)
+	overview := m.renderOverview()
+	overviewHeight := 0
+	if overview != "" {
+		overviewHeight = lipgloss.Height(overview)
+	}
+	bodyHeight := m.height - lipgloss.Height(top) - lipgloss.Height(footer) - overviewHeight
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
@@ -2685,7 +2630,71 @@ func (m Model) View() string {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, sidebar, panel)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, top, body, footer)
+	parts := []string{top}
+	if overview != "" {
+		parts = append(parts, overview)
+	}
+	parts = append(parts, body, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// fleetStats aggregates the latest per-container samples into a fleet mean CPU%
+// and total memory in use. n is how many containers contributed a sample.
+func (m Model) fleetStats() (cpuMean float64, memTotal float64, n int) {
+	var cpuSum float64
+	now := effectiveNow(m.lastUpdated)
+	for _, st := range m.stats {
+		var sample statHistorySample
+		var ok bool
+		if id := statIdentifier(st); id != "" {
+			sample, ok = m.latestStatSample(id)
+		}
+		if !ok {
+			sample, ok = statHistorySampleFromStat(st, now)
+		}
+		if !ok {
+			continue
+		}
+		if sample.hasCPU {
+			cpuSum += sample.cpuPercent
+		}
+		if sample.hasMemory {
+			memTotal += sample.memoryBytes
+		}
+		n++
+	}
+	if n > 0 {
+		cpuMean = cpuSum / float64(n)
+	}
+	return cpuMean, memTotal, n
+}
+
+// renderOverview draws the pinned, read-only fleet summary strip shown between
+// the top bar and the body. It returns "" when the terminal is too short or an
+// overlay is open, so callers can omit the row and reclaim its height.
+func (m Model) renderOverview() string {
+	if m.width < 60 || m.height < 18 || m.menu != nil || m.showHelp {
+		return ""
+	}
+	running := 0
+	for _, c := range m.containers {
+		if c.State() == "running" {
+			running++
+		}
+	}
+	segs := []string{
+		fmt.Sprintf("%d ctr (%d up)", len(m.containers), running),
+		fmt.Sprintf("%d img", len(m.images)),
+	}
+	if cpuMean, memTotal, n := m.fleetStats(); n > 0 {
+		segs = append(segs, fmt.Sprintf("cpu %5.1f%%", cpuMean), "mem "+containercli.FormatBytes(int64(memTotal)))
+	}
+	segs = append(segs, "disk "+m.systemUsage.TotalSize()+" / "+m.systemUsage.TotalReclaimable()+" reclaim")
+	if state := m.builder.State(); state != "" {
+		segs = append(segs, "builder "+state)
+	}
+	line := "FLEET  " + strings.Join(segs, " · ")
+	return overviewStyle.Width(m.width).Render(truncate(line, m.width-2))
 }
 
 // applyTheme overrides panel borders and accent colours from config. It mutates
@@ -2738,6 +2747,10 @@ var (
 	footerStyle = lipgloss.NewStyle().
 			Foreground(colorMuted).
 			Padding(0, 1)
+	overviewStyle = lipgloss.NewStyle().
+			Foreground(colorText).
+			Background(lipgloss.Color("236")).
+			Padding(0, 1)
 	panelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colorPanel).
@@ -2748,8 +2761,12 @@ var (
 			Foreground(lipgloss.Color("230")).
 			Background(lipgloss.Color("57")).
 			Bold(true)
-	mutedStyle = lipgloss.NewStyle().Foreground(colorMuted)
-	errorStyle = lipgloss.NewStyle().Foreground(colorRed)
+	// cursorRestStyle marks the selected row of an UNfocused section: bold but
+	// without the bright background, so each panel shows its current item
+	// without competing with the focused panel's highlight.
+	cursorRestStyle = lipgloss.NewStyle().Foreground(colorText).Bold(true)
+	mutedStyle      = lipgloss.NewStyle().Foreground(colorMuted)
+	errorStyle      = lipgloss.NewStyle().Foreground(colorRed)
 
 	runningStyle = lipgloss.NewStyle().Foreground(colorGreen)
 	stoppedStyle = lipgloss.NewStyle().Foreground(colorYellow)
@@ -2825,19 +2842,27 @@ func (m Model) renderFooter() string {
 		status = "ready"
 	}
 	if activeFilter(m.filter) != "" {
-		status = status + " · filter: " + m.filter
+		status = status + " · filter: " + truncate(m.filter, 18)
 	}
 	status = status + " · " + m.autoRefreshLabel()
 
 	inner := m.width - 2
-	statusText := truncate(status, inner)
+	// Reserve a stable slot for the status text so the hint strip doesn't
+	// reflow every time a routine message ("refreshed" → "loaded images")
+	// changes length. Short messages all share the reserved width, keeping the
+	// hints anchored; only an unusually long message (a guard or error) is
+	// allowed to eat into the hint space, dropping the lowest-priority hints.
+	const statusReserve = 30
+	statusFootprint := len(status)
+	if statusFootprint < statusReserve {
+		statusFootprint = statusReserve
+	}
+	hints, hintsWidth := fitKeyHints(m.footerKeyHints(), inner-statusFootprint-1)
+	statusText := truncate(status, inner-hintsWidth-1)
 	statusStyled := mutedStyle.Render(statusText)
 	if m.err != nil {
 		statusStyled = errorStyle.Render(statusText)
 	}
-	// The status message takes priority; hints fill whatever space is left,
-	// dropping the lowest-priority (trailing) ones when the line is tight.
-	hints, hintsWidth := fitKeyHints(m.footerKeyHints(), inner-len(statusText)-3)
 	gap := inner - len(statusText) - hintsWidth
 	if gap < 1 {
 		gap = 1
@@ -2902,7 +2927,7 @@ func fitKeyHints(pairs [][2]string, maxWidth int) (string, int) {
 
 func (m Model) autoRefreshLabel() string {
 	if m.autoRefresh {
-		return "u auto:on"
+		return "u auto:on "
 	}
 	return "u auto:off"
 }
@@ -3106,264 +3131,6 @@ func customCommandPlaceholders() []struct {
 		{"{registry}", "registry"},
 		{"{resource}", "resource"},
 	}
-}
-
-// sidebarRender holds a built stacked-panel sidebar: the rendered content lines
-// plus the geometry mouse hit-testing needs. Both renderSidebar and viewLayout
-// build it so the visuals and click targets never drift apart.
-type sidebarRender struct {
-	lines          []string             // content lines (inside the box border/padding)
-	headerRow      map[resourceKind]int // content-relative row of each section header
-	listFirstRow   int                  // content-relative row of the focused list's first item
-	listRows       int                  // item rows actually shown for the focused section
-	listDataHeight int                  // paging capacity used to window the focused list
-}
-
-// renderActiveList renders the item list for the focused section.
-func (m Model) renderActiveList(kind resourceKind, width int, height int) []string {
-	switch kind {
-	case resourceContainers:
-		return m.renderContainerList(width, height)
-	case resourceServices:
-		return m.renderServiceList(width, height)
-	case resourceImages:
-		return m.renderImageList(width, height)
-	case resourceBuilder:
-		return m.renderBuilderList(width, height)
-	case resourceVolumes:
-		return m.renderVolumeList(width, height)
-	case resourceNetworks:
-		return m.renderNetworkList(width, height)
-	case resourceMachines:
-		return m.renderMachineList(width, height)
-	case resourceRegistries:
-		return m.renderRegistryList(width, height)
-	case resourceSystem:
-		return m.renderSystemList(width, height)
-	}
-	return nil
-}
-
-func (m Model) countLabel(filtered int, total int) string {
-	if activeFilter(m.filter) == "" || filtered == total {
-		return strconv.Itoa(total)
-	}
-	return fmt.Sprintf("%d/%d", filtered, total)
-}
-
-func resourceLabel(kind resourceKind) string {
-	switch kind {
-	case resourceContainers:
-		return "containers"
-	case resourceServices:
-		return "services"
-	case resourceImages:
-		return "images"
-	case resourceBuilder:
-		return "builder"
-	case resourceVolumes:
-		return "volumes"
-	case resourceNetworks:
-		return "networks"
-	case resourceMachines:
-		return "machines"
-	case resourceRegistries:
-		return "registries"
-	case resourceSystem:
-		return "system"
-	default:
-		return "resource"
-	}
-}
-
-func (m Model) renderContainerList(width int, height int) []string {
-	indexes := m.filteredContainerIndexes()
-	if len(indexes) == 0 {
-		return []string{mutedStyle.Render(m.emptyListMessage("containers"))}
-	}
-	rows := []string{mutedStyle.Render(fitColumns("name", "state / cpu / mem", width))}
-	start := visibleStart(m.containerCursor, height-1, len(indexes))
-	end := start + height - 1
-	if end > len(indexes) {
-		end = len(indexes)
-	}
-	now := effectiveNow(m.lastUpdated)
-	for idx := start; idx < end; idx++ {
-		container := m.containers[indexes[idx]]
-		name := truncate(container.Name(), 22)
-		meta := fmt.Sprintf("%s  %s", container.State(), container.CreatedAgo(now))
-		if summary := m.statListSummary(container.Name()); summary != "" {
-			meta = fmt.Sprintf("%s  %s", container.State(), summary)
-		}
-		line := fitColumns(name, meta, width)
-		if idx == m.containerCursor {
-			line = selectedStyle.Width(width).Render(truncate(line, width))
-		} else {
-			line = colorState(line, container.State())
-		}
-		rows = append(rows, line)
-	}
-	return rows
-}
-
-func (m Model) renderImageList(width int, height int) []string {
-	indexes := m.filteredImageIndexes()
-	if len(indexes) == 0 {
-		return []string{mutedStyle.Render(m.emptyListMessage("images"))}
-	}
-	rows := []string{mutedStyle.Render(fitColumns("image", "size", width))}
-	start := visibleStart(m.imageCursor, height-1, len(indexes))
-	end := start + height - 1
-	if end > len(indexes) {
-		end = len(indexes)
-	}
-	for idx := start; idx < end; idx++ {
-		image := m.images[indexes[idx]]
-		name := truncate(image.Name(), 34)
-		line := fitColumns(name, image.Size(), width)
-		if idx == m.imageCursor {
-			line = selectedStyle.Width(width).Render(truncate(line, width))
-		}
-		rows = append(rows, line)
-	}
-	return rows
-}
-
-func (m Model) renderBuilderList(width int, height int) []string {
-	if !m.builderMatchesFilter() {
-		return []string{mutedStyle.Render(m.emptyListMessage("builder"))}
-	}
-	rows := []string{mutedStyle.Render(fitColumns("builder", "state", width))}
-	if height <= 1 {
-		return rows
-	}
-	line := fitColumns(m.builder.Name(), m.builder.State(), width)
-	line = selectedStyle.Width(width).Render(truncate(line, width))
-	return append(rows, line)
-}
-
-func (m Model) renderVolumeList(width int, height int) []string {
-	indexes := m.filteredVolumeIndexes()
-	if len(indexes) == 0 {
-		return []string{mutedStyle.Render(m.emptyListMessage("volumes"))}
-	}
-	rows := []string{mutedStyle.Render(fitColumns("volume", "size", width))}
-	start := visibleStart(m.volumeCursor, height-1, len(indexes))
-	end := start + height - 1
-	if end > len(indexes) {
-		end = len(indexes)
-	}
-	now := effectiveNow(m.lastUpdated)
-	for idx := start; idx < end; idx++ {
-		volume := m.volumes[indexes[idx]]
-		name := truncate(volume.Name(), 34)
-		meta := fmt.Sprintf("%s  %s", volume.Size(), volume.CreatedAgo(now))
-		line := fitColumns(name, meta, width)
-		if idx == m.volumeCursor {
-			line = selectedStyle.Width(width).Render(truncate(line, width))
-		}
-		rows = append(rows, line)
-	}
-	return rows
-}
-
-func (m Model) renderNetworkList(width int, height int) []string {
-	indexes := m.filteredNetworkIndexes()
-	if len(indexes) == 0 {
-		return []string{mutedStyle.Render(m.emptyListMessage("networks"))}
-	}
-	rows := []string{mutedStyle.Render(fitColumns("network", "mode", width))}
-	start := visibleStart(m.networkCursor, height-1, len(indexes))
-	end := start + height - 1
-	if end > len(indexes) {
-		end = len(indexes)
-	}
-	for idx := start; idx < end; idx++ {
-		network := m.networks[indexes[idx]]
-		name := truncate(network.Name(), 34)
-		meta := emptyDash(network.Configuration.Mode)
-		line := fitColumns(name, meta, width)
-		if idx == m.networkCursor {
-			line = selectedStyle.Width(width).Render(truncate(line, width))
-		}
-		rows = append(rows, line)
-	}
-	return rows
-}
-
-func (m Model) renderMachineList(width int, height int) []string {
-	indexes := m.filteredMachineIndexes()
-	if len(indexes) == 0 {
-		return []string{mutedStyle.Render(m.emptyListMessage("machines"))}
-	}
-	rows := []string{mutedStyle.Render(fitColumns("machine", "state", width))}
-	start := visibleStart(m.machineCursor, height-1, len(indexes))
-	end := start + height - 1
-	if end > len(indexes) {
-		end = len(indexes)
-	}
-	now := effectiveNow(m.lastUpdated)
-	for idx := start; idx < end; idx++ {
-		machine := m.machines[indexes[idx]]
-		name := truncate(machine.Name(), 26)
-		meta := fmt.Sprintf("%s  %s", machine.State(), machine.CreatedAgo(now))
-		if machine.Default {
-			name = "* " + name
-		}
-		line := fitColumns(name, meta, width)
-		if idx == m.machineCursor {
-			line = selectedStyle.Width(width).Render(truncate(line, width))
-		} else if machine.State() == "running" {
-			line = runningStyle.Render(line)
-		}
-		rows = append(rows, line)
-	}
-	return rows
-}
-
-func (m Model) renderRegistryList(width int, height int) []string {
-	indexes := m.filteredRegistryIndexes()
-	if len(indexes) == 0 {
-		return []string{mutedStyle.Render(m.emptyListMessage("registries"))}
-	}
-	rows := []string{mutedStyle.Render(fitColumns("registry", "user", width))}
-	start := visibleStart(m.registryCursor, height-1, len(indexes))
-	end := start + height - 1
-	if end > len(indexes) {
-		end = len(indexes)
-	}
-	for idx := start; idx < end; idx++ {
-		registry := m.registries[indexes[idx]]
-		name := truncate(registry.Name(), 34)
-		meta := emptyDash(registry.User())
-		line := fitColumns(name, meta, width)
-		if idx == m.registryCursor {
-			line = selectedStyle.Width(width).Render(truncate(line, width))
-		}
-		rows = append(rows, line)
-	}
-	return rows
-}
-
-func (m Model) renderSystemList(width int, height int) []string {
-	if !m.systemMatchesFilter() {
-		return []string{mutedStyle.Render(m.emptyListMessage("system"))}
-	}
-	rows := []string{mutedStyle.Render(fitColumns("system", "status", width))}
-	if height <= 1 {
-		return rows
-	}
-	meta := fmt.Sprintf("%s  %s used", emptyDash(m.system.Status), m.systemUsage.TotalSize())
-	line := fitColumns("system", meta, width)
-	line = selectedStyle.Width(width).Render(truncate(line, width))
-	return append(rows, line)
-}
-
-func (m Model) emptyListMessage(kind string) string {
-	if activeFilter(m.filter) == "" {
-		return "No " + kind + " found."
-	}
-	return "No " + kind + " match " + fmt.Sprintf("%q.", m.filter)
 }
 
 func (m Model) renderPanel(width int, height int) string {
@@ -3701,6 +3468,16 @@ func stripNewline(value string) string {
 	value = strings.ReplaceAll(value, "\n", " ")
 	value = strings.ReplaceAll(value, "\r", " ")
 	return value
+}
+
+// padLeft right-aligns value in a field of width columns (space-padded on the
+// left) so right-aligned, live-updating columns keep a constant width as their
+// contents gain or lose characters. It never truncates.
+func padLeft(value string, width int) string {
+	if len(value) >= width {
+		return value
+	}
+	return strings.Repeat(" ", width-len(value)) + value
 }
 
 func emptyDash(value string) string {
