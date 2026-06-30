@@ -2,7 +2,7 @@
 
 `Formula/lazycontainer.rb` is a tap-ready Homebrew formula for installing lazycontainer from source.
 
-The formula ships a stable release (`v0.5.0`) and also supports installing from `main` with `--HEAD`. Homebrew core now ships Apple's `container` CLI as the `container` formula, so lazycontainer can depend on that package instead of asking users to install the CLI separately. Homebrew also requires formulae to live in a tap, so the first public packaging target should be a small tap such as `pzep1/homebrew-lazycont`.
+The formula ships a stable release (`v0.5.1`) and also supports installing from `main` with `--HEAD`. Homebrew core now ships Apple's `container` CLI as the `container` formula, so lazycontainer can depend on that package instead of asking users to install the CLI separately. Homebrew also requires formulae to live in a tap, so the first public packaging target should be a small tap such as `pzep1/homebrew-lazycont`.
 
 ## Formula smoke
 
@@ -49,8 +49,8 @@ brew test pzep1/lazycont/lazycontainer
 Once a first release is tagged, add a stable source archive to the formula:
 
 ```ruby
-url "https://github.com/pzep1/lazycontainer/archive/refs/tags/v0.5.0.tar.gz"
-sha256 "80a618261c937f028fa7ff27a90f0948c6b43ba905eb2cc7c58a2887983b2306"
+url "https://github.com/pzep1/lazycontainer/archive/refs/tags/v0.5.1.tar.gz"
+sha256 "9f207ab5b0cffc0dedd146e44ef3f8546cdef3a19f6c35d40005e4367039b6c4"
 ```
 
 Then rerun:
