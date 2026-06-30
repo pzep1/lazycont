@@ -9,7 +9,7 @@ name: Release
 # possible:
 #   1. preflight  — validate the tag, the tap credential and access, and
 #                   compute the archive sha256. No side effects.
-#   2. mutate     — bump the in-tree formula (commit to main) and the tap repo
+#   2. mutate     — open/update an in-tree formula bump PR and bump the tap repo
 #                   formula, using one canonical helper (.github/bump-formula.sh)
 #                   that asserts each file actually holds the new url + sha256
 #                   (failing loudly if a formula's shape has drifted).
@@ -31,6 +31,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   release:
@@ -93,8 +94,9 @@ jobs:
       # ---------------------------------------------------------------- #
       # Mutate: bump both formulae with the canonical helper.             #
       # ---------------------------------------------------------------- #
-      - name: Bump in-tree formula on main
+      - name: Open in-tree formula bump PR
         env:
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.sha.outputs.version }}
           SHA256: ${{ steps.sha.outputs.sha256 }}
         run: |
@@ -103,10 +105,28 @@ jobs:
             echo "In-tree formula already up to date."
             exit 0
           fi
+          branch="release/bump-formula-v${VERSION}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
           git commit -m "Bump in-tree Homebrew formula to v${VERSION}" -- Formula/lazycontainer.rb
-          git push origin HEAD:main
+          git push --force origin "$branch"
+          pr_number="$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --head "$branch" \
+            --state open \
+            --json number \
+            --jq '.[0].number // ""')"
+          if [[ -n "$pr_number" ]]; then
+            echo "In-tree formula bump PR already open: #$pr_number"
+            exit 0
+          fi
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head "$branch" \
+            --title "Bump in-tree Homebrew formula to v${VERSION}" \
+            --body "Updates Formula/lazycontainer.rb to v${VERSION} with SHA256 ${SHA256}."
 
       - name: Bump tap repo formula
         env:
